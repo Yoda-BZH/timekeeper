@@ -20,7 +20,7 @@ class ApiController extends AbstractController
     {
       $type = $request->query->get('type');
       $force = (bool) $request->query->get('force');
-      
+
       //try {
         $connector = $connectorManager->get($type);
       //}
@@ -32,16 +32,16 @@ class ApiController extends AbstractController
       //}
       $data = $connector->get(
         $request->query->get('start'),
-        $request->query->get('end'), 
+        $request->query->get('end'),
         $force
       );
-      
+
       $response = new Response(json_encode($data));
       $response->headers->set('Content-Type', 'application/json');
-      
+
       return $response;
     }
-    
+
     /**
      * @Route("/api/{type}/{action}", methods={"GET"})
      */
@@ -56,13 +56,13 @@ class ApiController extends AbstractController
         $args[$queryName] = $request->query->get($queryName);
       }
       $data = $connector->$cb($args);
-      
+
       $response = new Response(json_encode($data));
       $response->headers->set('Content-Type', 'application/json');
 
       return $response;
     }
-    
+
     /**
      * @Route("/api/{type}/{action}", methods={"POST"})
      */
@@ -89,11 +89,11 @@ class ApiController extends AbstractController
     public function user(Security $security)
     {
       $username = $security->getUser()->getUsername();
-      
+
       $response = new Response(\json_encode(array('user' => $username)));
       $response->headers->set('Content-Type', 'application/json');
-      
+
       return $response;
     }
-    
+
 }
