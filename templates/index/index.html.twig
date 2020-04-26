@@ -38,7 +38,7 @@
 {% endblock %}
 
 {% block body %}
-<div id="IE">
+<div id="loading-timekeeper">
   <h1>Chargement de TimeKeeper en cours ...</h1>
   <p>Si ce message est persistant, l'application n'arrive pas interprêter le javascript, ou notre navigateur n'est malheureusement pas compatible.</p>
 </div>
@@ -72,6 +72,12 @@
   <div id="mainMenu" class="ui-front" title="Configuration">
     <form>
       <div id="configuration-colors">
+        <div id="configuration-colors-color-__main" class="form-row">
+          <div class="form-group col-md-6">
+            <label for="idColor">Couleur du récapitulatif journalier:</label>
+            <input class="form-control" type="color" id="idColor___main" value="" />
+          </div>
+        </div>
         <div id="configuration-colors-color-template" class="form-row">
           <div class="form-group col-md-6">
             <label for="idColor">Couleur</label>

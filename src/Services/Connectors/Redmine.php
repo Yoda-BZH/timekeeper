@@ -185,18 +185,18 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
       );
     }
 
-    foreach($cumulated as $k => $c)
-    {
-      $entries[] = array(
-        'title' => 'Total: '.$this->nicetime($c),
-        'start' => $k,
-        'end'   => $k,
-        'type'  => 'redmine',
-        'rid'   => '',
-        'spent' => $c,
-        'allDay'=> True,
-      );
-    }
+    //foreach($cumulated as $k => $c)
+    //{
+    //  $entries[] = array(
+    //    'title' => 'Total: '.$this->nicetime($c),
+    //    'start' => $k,
+    //    'end'   => $k,
+    //    'type'  => 'redmine',
+    //    'rid'   => '',
+    //    'spent' => $c,
+    //    'allDay'=> True,
+    //  );
+    //}
 
     $cachedRedmineEl->set($entries);
     $cachedRedmineEl->expiresAfter($expiration = 600);

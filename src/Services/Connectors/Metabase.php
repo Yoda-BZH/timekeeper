@@ -73,17 +73,17 @@ abstract class Metabase extends AbstractConnector implements ConnectorInterface
     $entryManager->entries = $ret;
     $entries = $entryManager->convert();
 
-    foreach($entryManager->cumulated as $k => $c)
-    {
-      $entries[] = array(
-        'title' => 'Total: '.$this->nicetime($c),
-        'start' => $k,
-        'end'   => $k,
-        'type'  => $entryManager->type,
-        'spent' => $c,
-        'allDay'=> True,
-      );
-    }
+    //foreach($entryManager->cumulated as $k => $c)
+    //{
+    //  $entries[] = array(
+    //    'title' => 'Total: '.$this->nicetime($c),
+    //    'start' => $k,
+    //    'end'   => $k,
+    //    'type'  => $entryManager->type,
+    //    'spent' => $c,
+    //    'allDay'=> True,
+    //  );
+    //}
     
     $cachedInfosEl->set($entries);
     $cachedInfosEl->expiresAfter($expiration = 600);

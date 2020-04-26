@@ -124,6 +124,8 @@
       //visibility_redmine: 'visible',
       //visibility_exchange: 'visible',
       //visibility_gitlab: 'visible',
+      visibility___main: 'visible',
+      color___main: "#62A7B0",
     }
 
     requestedConf = {
@@ -131,6 +133,7 @@
       //colorRedmine:         localStorage.getItem("colorRedmine"),
       //colorExchange:        localStorage.getItem("colorExchange"),
       //colorGitlab:          localStorage.getItem("colorGitlab"),
+      color___main:         localStorage.getItem("color___main"),
       showWeekend:          localStorage.getItem("showWeekend") === "false" ? false : true,
       businessHourStart:    localStorage.getItem("businessHourStart"),
       businessHourEnd:      localStorage.getItem("businessHourEnd"),
@@ -217,6 +220,7 @@
       //$("#idColor_" + key).val(configuration['color_' + key]);
       configurationColorParentDiv.append(colorForm);
     }
+    $("#idColor___main").val(configuration['color___main']);
     colorTemplateForm.remove();
     $("#showWeekend").prop('checked', configuration.showWeekend);
     $("#businessHourStart").val(configuration.businessHourStart);
@@ -363,12 +367,12 @@
       plugins[key].updateCallback = function(el) {
         if(!el)
         {
-          console.log("update callback called without clicked element !");
+          //console.log("update callback called without clicked element !");
           return;
         }
-        console.log('got el', el.target.className);
+        //console.log('got el', el.target.className);
         var k = el.target.className.match(/fc-update_([^ ]+)-button/);
-        console.log('found k', k);
+        //console.log('found k', k);
         if(2 != k.length)
         {
           return;
@@ -412,7 +416,7 @@
     var actionsUserCustomButtons = {};
     for(var key in options.actionsCustomButtons)
     {
-      console.log("adding custom action button ", key);
+      //console.log("adding custom action button ", key);
       actionsUserCustomButtons[key] = options.actionsCustomButtons[key];
       header.left.push(key);
     }
@@ -420,7 +424,7 @@
     var otherUserCustomButtons = {};
     for(var key in options.otherCustomButtons)
     {
-      console.log("adding custom button ", key);
+      //console.log("adding custom button ", key);
       otherUserCustomButtons[key] = options.otherCustomButtons[key];
       header.right.push(key);
     }
@@ -548,6 +552,7 @@
       {
         localStorage.setItem("color_" + key, configuration['color_' + key] = $("#idColor_" + key).val());
       }
+      localStorage.setItem("color___main", configuration['color__main'] = $("#idColor___main").val());
 
       calendar.setOption('businessHours', [
         {
@@ -842,6 +847,7 @@
       })
       .always(function() {
         $($('.fc-update_' + this.tksource + '-button')[0]).removeAttr('disabled');
+        computeAccountedEntries();
       })
       ;
     }
@@ -925,7 +931,8 @@
 
   //document.addEventListener('DOMContentLoaded', function() {
 
-  function updateAssignedRedmines() {
+  function updateAssignedRedmines()
+  {
     $.getJSON('/api/redmine/assigned', function(issues) {
       if(0 == issues.count)
       {
@@ -945,11 +952,104 @@
     ;
   };
 
+  function computeAccountedEntries()
+  {
+    var accountedByDate = {};
+    var accountedByDateAndType = {};
+    var events = calendar.getEvents();
+
+    for(var i in events)
+    {
+      event = events[i];
+      //console.log('treating', event);
+      if(event.allDay)
+      {
+        event.remove();
+        continue;
+      }
+      if(!plugins[event.extendedProps.type].accountable)
+      {
+        continue;
+      }
+
+      var difference = (event.end - event.start) / 1000 / 60;
+      //console.log('difference', difference);
+
+      var eventDate = event.start.getFullYear() + '-' + formatNumber(event.start.getMonth() + 1) + '-' + formatNumber(event.start.getDate());
+      if(!accountedByDate[eventDate])
+      {
+        accountedByDate[eventDate] = [];
+      }
+      accountedByDate[eventDate].push(difference);
+
+      if(!accountedByDateAndType[eventDate])
+      {
+        accountedByDateAndType[eventDate] = [];
+      }
+
+      if(!accountedByDateAndType[eventDate][event.extendedProps.type])
+      {
+        accountedByDateAndType[eventDate][event.extendedProps.type] = [];
+      }
+      accountedByDateAndType[eventDate][event.extendedProps.type].push(difference);
+    }
+
+    //console.log('accounted', accountedByDate, accountedByDateAndType);
+    for(var eventsDate in accountedByDate)
+    {
+      //console.log('treating ', eventsDate);
+      var sum = array_sum(accountedByDate[eventsDate]);
+      var sumDetails = [];
+      for(var eventType in accountedByDateAndType[eventDate])
+      {
+        //console.log('has to be show', accountedByDateAndType[eventDate][eventType]);
+        var sumForDateAndType = array_sum(accountedByDateAndType[eventDate][eventType]);
+        if(0 == sumForDateAndType)
+        {
+          continue;
+        }
+        var str = plugins[eventType].name + ': ' + nicetime(sumForDateAndType);
+        sumDetails.push(str);
+      }
+
+      var mainStr = 'Total: ' + nicetime(sum) + ' - ' + sumDetails.join(', ');
+      //console.log(mainStr, eventsDate);
+
+      var accountedEvent = {
+        title: mainStr,
+        start: eventsDate + 'T00:00:00',
+        //end: eventsDate + 'T00:00:00',
+        allDay: true,
+        extendedProps: { type: '__main', },
+        color: configuration['color___main'],
+      };
+      //console.log('event added', accountedEvent);
+      var r = calendar.addEvent(accountedEvent);
+      //console.log(r);
+    }
+    //console.log('accounted done');
+    return true;
+  }
+
+  function nicetime(minutes)
+  {
+    var hours = Math.floor(minutes / 60);
+    var minutes = minutes % 60;
+
+    return formatNumber(hours) + ':' + formatNumber(minutes);
+  }
+
+  function array_sum(arr){
+    return arr.reduce(function(a,b){
+      return a + b
+    }, 0);
+  }
+
   TimeKeeper = {
     initialize: initialize,
     run: run,
     finalize: finalize,
-    formatNumber: formatNumber
+    formatNumber: formatNumber,
   };
 
   return TimeKeeper;

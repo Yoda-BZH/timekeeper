@@ -186,12 +186,12 @@ class MetaBaseEntryManager {
         break;
     }
 
-    $dayFormat = $entry['end']->format('Y-m-d');
-    if(!isset($this->cumulated[$dayFormat]))
-    {
-      $this->cumulated[$dayFormat] = 0;
-    }
-    $this->cumulated[$dayFormat] += (int) $originalSpentTime;
+    //$dayFormat = $entry['end']->format('Y-m-d');
+    //if(!isset($this->cumulated[$dayFormat]))
+    //{
+    //  $this->cumulated[$dayFormat] = 0;
+    //}
+    //$this->cumulated[$dayFormat] += (int) $originalSpentTime;
 
     return $newEntry;
   }
