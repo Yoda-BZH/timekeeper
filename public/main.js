@@ -10,15 +10,14 @@
 
   var pendingEvent = undefined;
 
-  var elemDialog = $("#createNew");
+  var elemDialog = undefined;
 
-  var configurationMenu = $("#mainMenu");
+  var configurationMenu = undefined;
 
-  var redmineObj = $("#idRedmine");
-
-  var redmineComment = $('#idComment');
-
-  var redmineText = $("#redmineText");
+  var hasRedmine = false;
+  var redmineObj = undefined;
+  var redmineComment = undefined;
+  var redmineText = undefined;
 
   var timeouts = {
     otrs: undefined,
@@ -31,43 +30,32 @@
 
   var eventInfo = null;
 
-  var themeSelector = document.getElementById("themeName");
+  var themeSelector = undefined;
 
   var calendar = {};
   var calendarOptions = {};
 
   // theme list: https://www.bootstrapcdn.com/bootswatch/
-  var allowedThemes = {
-    default: {
-      name: "Default (bootstrap)",
-      url: "https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css",
-      integrity: 'sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh',
-    },
-    darky: {
-      name: "Darkly",
-      url: "https://stackpath.bootstrapcdn.com/bootswatch/4.4.1/darkly/bootstrap.min.css",
-      integrity: 'sha384-rCA2D+D9QXuP2TomtQwd+uP50EHjpafN+wruul0sXZzX/Da7Txn4tB9aLMZV4DZm',
-    },
-  };
+  var allowedThemes = {};
 
   var defaultConfiguration = {};
-  
+
   var requestedConf = {};
-  
+
   var configuration = {};
 
-  var btnHideExchangeEvent = $("#hideEvent");
+  var btnHideExchangeEvent = undefined;
 
   //form = elemDialog.children('form')[0]; //submit = elemDialog.find('p input[type=button]')[0];
 
-  var btnSubmit = $(elemDialog.find('#timeentryAdd')[0]);
+  var btnSubmit = undefined;
 
-  var btnCancel;
+  var btnCancel = undefined;
 
   var redmineUpdateButton = undefined;
 
-  var btnConfigurationSave = $("#configurationSave");
-  
+  var btnConfigurationSave = undefined;
+
   var plugins = {};
 
   function convertSessionStorageToLocalStorage()
@@ -89,13 +77,13 @@
   function initialize(options, userPlugins)
   {
     plugins = userPlugins;
-    
+
     if(sessionStorage.getItem('colorOtrs'))
     {
       //console.log('converting session storage to local storage');
       convertSessionStorageToLocalStorage();
     }
-    
+
     if(localStorage.getItem("colorOtrs"))
     {
       //console.log('converting old color storage values to new');
@@ -103,7 +91,7 @@
       localStorage.setItem("color_redmine", localStorage.getItem("colorRedmine"));
       localStorage.setItem("color_exchange", localStorage.getItem("colorExchange"));
       localStorage.setItem("color_gitlab", localStorage.getItem("colorGitlab"));
-      
+
       localStorage.removeItem("colorOtrs");
       localStorage.removeItem("colorRedmine");
       localStorage.removeItem("colorExchange");
@@ -146,6 +134,10 @@
     };
     for(key in plugins)
     {
+      if ('redmine' == key)
+      {
+        hasRedmine = true;
+      }
       defaultConfiguration['color_' + key] = plugins[key].color;
       defaultConfiguration['visibility_' + key] = plugins[key].color;
       requestedConf['color_' + key] = localStorage.getItem("color_" + key);
@@ -155,15 +147,42 @@
     Object.keys(requestedConf).forEach((key) => (requestedConf[key] === null) && delete requestedConf[key]);
 
     configuration = {...defaultConfiguration, ...requestedConf};
-    console.log(configuration);
-    redmineObj.val("");
-    redmineText.html("");
-    redmineComment.val("");
 
-    elemDialog.dialog({
-      'autoOpen': false,
-      zIndex: 100,
-    });
+    // theme list: https://www.bootstrapcdn.com/bootswatch/
+    allowedThemes = {
+      default: {
+        name: "Default (bootstrap)",
+        url: "https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css",
+        integrity: 'sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh',
+      },
+      darky: {
+        name: "Darkly",
+        url: "https://stackpath.bootstrapcdn.com/bootswatch/4.4.1/darkly/bootstrap.min.css",
+        integrity: 'sha384-rCA2D+D9QXuP2TomtQwd+uP50EHjpafN+wruul0sXZzX/Da7Txn4tB9aLMZV4DZm',
+      },
+    };
+    themeSelector = document.getElementById("themeName");
+    configurationMenu = $("#mainMenu");
+
+    if(hasRedmine)
+    {
+      elemDialog = $("#createNew");
+      btnSubmit = $(elemDialog.find('#timeentryAdd')[0]);
+      redmineObj = $("#idRedmine");
+      redmineComment = $('#idComment');
+      redmineText = $("#redmineText");
+      redmineObj.val("");
+      redmineText.html("");
+      redmineComment.val("");
+      elemDialog.dialog({
+        'autoOpen': false,
+        zIndex: 100,
+      });
+    }
+    btnHideExchangeEvent = $("#hideEvent");
+    btnConfigurationSave = $("#configurationSave");
+
+    //console.log(configuration);
 
     configurationMenu.dialog({
       autoOpen: false,
@@ -178,7 +197,7 @@
     //$("#idColorGitlab").val(configuration.colorGitlab);
     var configurationColorParentDiv = $("#configuration-colors");
     var colorTemplateForm = $("#configuration-colors-color-template");
-    for(key in plugins)
+    for(var key in plugins)
     {
       var colorForm = colorTemplateForm.clone();
       colorForm.find('label').text("Couleur " + plugins[key].name + " :");
@@ -196,125 +215,127 @@
     $('#showTooltips').prop('checked', configuration.showTooltips);
     $('#showMaskedEvents').prop('checked', configuration.showMaskedEvents);
 
-    elemDialog.on('dialogclose', function(event, ui) {
-      //console.log(event, ui);
-      elemDialog.find("#datetime").text("");
-      //redmineId = redmineObj.val();
-      redmineObj.val("");
-      redmineComment.val("");
-      redmineText.html("");
-      pendingEvent && pendingEvent.remove();
-      timeouts.redmine && clearTimeout(timeouts.redmine);
-      timeouts.redmine = setTimeout(updateRedmine, 1000 * configuration.refresh);
-      redmineUpdateButton.removeClass('pulsating-button');
-    });
-
-    //elemDialog.
-    btnSubmit.bind('click', function(event) {
-      event.preventDefault();
-      var redmineId = redmineObj.val();
-      //console.log("adding time for redmine " + redmineId);
-      var comment = redmineComment.val();
-
-      var postData = {
-        start: pendingEvent.start,
-        end: pendingEvent.end,
-        comment: comment,
-        rid: redmineId,
-        uid: pendingEvent.extendedProps.uid,
-      }
-
-      pendingEvent.setProp('title', redmineId);
-      pendingEvent.setProp('color', '#EA7D73');
-      $.post('/api/redmine/add', postData, function(data, status, xhr) {
-        var newEntry = data;
-        calendar.addEvent(newEntry);
-      })
-      .fail(function() {
-        alert('Impossible de créer l\'entrées');
-      })
-      .always(function() {
-        updateRedmine()
-      })
-      ;
-
-      pendingEvent = undefined;
-      redmineObjCleanup();
-    });
-
-    btnHideExchangeEvent.bind('click', function(event) {
-      event.preventDefault();
-      var postData = {
-        start: pendingEvent.start,
-        uid: pendingEvent.extendedProps.uid,
-      };
-      //console.log(postData);
-      $.post('/api/exchange/event-hide', postData, function(data, status, xhr) {
-        pendingEvent.extendedProps.original.remove();
-        elemDialog.dialog('close');
-      });
-    });
-
-    btnCancel = $(elemDialog.find("#timeentryCancel")[0]);
-    btnCancel.bind('click', function(event) {
-      event.preventDefault();
-      redmineObjCleanup();
-    });
-
-    redmineObj.autocomplete({
-      appendTo: "#createNew",
-      source: '/api/redmine/autocomplete',
-      minLength: 0,
-      select: function(event, ui) {
+    if(hasRedmine)
+    {
+      elemDialog.on('dialogclose', function(event, ui) {
+        //console.log(event, ui);
+        elemDialog.find("#datetime").text("");
+        //redmineId = redmineObj.val();
         redmineObj.val("");
-        //console.log('setting');
-        redmineObj.val(ui.item.rid);
-        redmineText.text(ui.item.label);
-        //console.log('set', $("#idRedmine").val());
-
-        //event = {
-        //  start:
-        //};
-        //calendarEl.addEvent(event);
-
-        // activer le bouton que si on a un ticket redmine
-        $("#timeentryAdd").removeAttr('disabled');
-        return false;
-      },
-      focus: function(event, ui) {
-        if(!ui.item.rid)
-        {
-          return false;
-        }
-        redmineObj.val(ui.item.rid);
-        redmineText.text(ui.item.label);
-        //realRedmine.val(ui.item.rid);
-      },
-      close(event, ui) {
-        if(redmineObj.val() != '')
-        {
-          return;
-        }
+        redmineComment.val("");
         redmineText.html("");
-      },
-      open: function () {
-          $('.ui-autocomplete.ui-front').css('z-index', elemDialog.css('z-index') + 1);
-      },
-      response: function(event, ui)
-      {
-        var nbOfElement = ui.content.length;
-        if(0 == nbOfElement)
-        {
-          var notFoundElement = {
-            rid: '',
-            label: 'Aucun redmine ? Essayez le bouton "Mes redmines" pour forcer une mise à jour des redmines !',
-            value: '',
-          };
-          ui.content.push(notFoundElement);
-          redmineUpdateButton.addClass('pulsating-button');
+        pendingEvent && pendingEvent.remove();
+        timeouts.redmine && clearTimeout(timeouts.redmine);
+        timeouts.redmine = setTimeout(updateRedmine, 1000 * configuration.refresh);
+        redmineUpdateButton.removeClass('pulsating-button');
+      });
+
+      btnSubmit.bind('click', function(event) {
+        event.preventDefault();
+        var redmineId = redmineObj.val();
+        //console.log("adding time for redmine " + redmineId);
+        var comment = redmineComment.val();
+
+        var postData = {
+          start: pendingEvent.start,
+          end: pendingEvent.end,
+          comment: comment,
+          rid: redmineId,
+          uid: pendingEvent.extendedProps.uid,
         }
-      }
-    });
+
+        pendingEvent.setProp('title', redmineId);
+        pendingEvent.setProp('color', '#EA7D73');
+        $.post('/api/redmine/add', postData, function(data, status, xhr) {
+          var newEntry = data;
+          calendar.addEvent(newEntry);
+        })
+        .fail(function() {
+          alert('Impossible de créer l\'entrées');
+        })
+        .always(function() {
+          updateRedmine()
+        })
+        ;
+
+        pendingEvent = undefined;
+        redmineObjCleanup();
+      });
+
+      btnHideExchangeEvent.bind('click', function(event) {
+        event.preventDefault();
+        var postData = {
+          start: pendingEvent.start,
+          uid: pendingEvent.extendedProps.uid,
+        };
+        //console.log(postData);
+        $.post('/api/exchange/event-hide', postData, function(data, status, xhr) {
+          pendingEvent.extendedProps.original.remove();
+          elemDialog.dialog('close');
+        });
+      });
+
+      btnCancel = $(elemDialog.find("#timeentryCancel")[0]);
+      btnCancel.bind('click', function(event) {
+        event.preventDefault();
+        redmineObjCleanup();
+      });
+
+      redmineObj.autocomplete({
+        appendTo: "#createNew",
+        source: '/api/redmine/autocomplete',
+        minLength: 0,
+        select: function(event, ui) {
+          redmineObj.val("");
+          //console.log('setting');
+          redmineObj.val(ui.item.rid);
+          redmineText.text(ui.item.label);
+          //console.log('set', $("#idRedmine").val());
+
+          //event = {
+          //  start:
+          //};
+          //calendarEl.addEvent(event);
+
+          // activer le bouton que si on a un ticket redmine
+          $("#timeentryAdd").removeAttr('disabled');
+          return false;
+        },
+        focus: function(event, ui) {
+          if(!ui.item.rid)
+          {
+            return false;
+          }
+          redmineObj.val(ui.item.rid);
+          redmineText.text(ui.item.label);
+          //realRedmine.val(ui.item.rid);
+        },
+        close(event, ui) {
+          if(redmineObj.val() != '')
+          {
+            return;
+          }
+          redmineText.html("");
+        },
+        open: function () {
+            $('.ui-autocomplete.ui-front').css('z-index', elemDialog.css('z-index') + 1);
+        },
+        response: function(event, ui)
+        {
+          var nbOfElement = ui.content.length;
+          if(0 == nbOfElement)
+          {
+            var notFoundElement = {
+              rid: '',
+              label: 'Aucun redmine ? Essayez le bouton "Mes redmines" pour forcer une mise à jour des redmines !',
+              value: '',
+            };
+            ui.content.push(notFoundElement);
+            redmineUpdateButton.addClass('pulsating-button');
+          }
+        }
+      });
+    }
 
     var customButtonsUpdate = {};
     var customButtonsToggle = {};
@@ -361,11 +382,11 @@
         text: "Toggle " + plugin.name,
         click: plugins[key].toggleCallback,
       };
-      
+
       updateButtons.push(updateKey);
       toggleButtons.push(toggleKey);
     };
-    
+
     var header = {
       left: ['prev,next today'], // + updateButtons.join(',') + ' ' + toggleButtons.join(','), // myRedmines',
       center: 'title',
@@ -374,7 +395,7 @@
 
     header.left.push(updateButtons.join(','));
     header.left.push(toggleButtons.join(','));
-    
+
     var actionsUserCustomButtons = {};
     for(var key in options.actionsCustomButtons)
     {
@@ -382,7 +403,7 @@
       actionsUserCustomButtons[key] = options.actionsCustomButtons[key];
       header.left.push(key);
     }
-    
+
     var otherUserCustomButtons = {};
     for(var key in options.otherCustomButtons)
     {
@@ -390,7 +411,7 @@
       otherUserCustomButtons[key] = options.otherCustomButtons[key];
       header.right.push(key);
     }
-    
+
     var customButtonBurger = {
       openBurgerMenu: {
         text: "☰",
@@ -399,63 +420,12 @@
     }
     header.right.push("openBurgerMenu");
     header.right = header.right.join(' ');
-    
+
     header.left = header.left.join(' ');
-    
+
     console.log('header.right', header.right);
-    
+
     var customButtons = { ...customButtonsUpdate, ...customButtonsToggle, ...actionsUserCustomButtons, ...otherUserCustomButtons, ...customButtonBurger};
-    /*customButtons = {
-      updateOtrs: {
-        text: "↻ OTRS",
-        click: updateOtrs,
-      },
-      updateRedmine: {
-        text: "↻ Redmine",
-        click: updateRedmine,
-      },
-      updateExchange: {
-        text: "↻ Exchange",
-        click: updateExchange,
-      },
-      updateGitlab: {
-        text: "↻ Gitlab",
-        click: updateGitlab,
-      },
-      toggleOtrs: {
-        text: "Toggle OTRS",
-        click: toggleOtrs,
-      },
-      toggleRedmine: {
-        text: "Toggle Redmine",
-        click: toggleRedmine,
-      },
-      toggleExchange: {
-        text: "Toggle Exchange",
-        click: toggleExchange,
-      },
-      toggleGitlab: {
-        text: "Toggle Gitlab",
-        click: toggleGitlab,
-      },
-      myRedmines: {
-        text: "Mes redmines",
-        click: updateMyRedmines,
-      },
-      gotoGitlab: {
-        text: 'Gitlab',
-        click: gotoGitlab,
-      },
-      gotoMetabase: {
-        text: 'Metabase',
-        click: gotoMetabase,
-      },
-      openBurgerMenu: {
-        text: "☰",
-        click: openBurgerMenu,
-      },
-    };*/
-    //customButtons = customButtonsUpdate;
     console.log(customButtons);
 
     calendarOptions = {
@@ -506,11 +476,12 @@
       //events: events,
       eventClick: function(info) {
         //console.log(info.event);
-        if(info.event.extendedProps.type == 'exchange')
+        if(plugins[info.event.extendedProps.type].convertible)
         {
           showPopupToConvertToRedmine(info.event);
         }
         info.jsEvent.preventDefault();
+        // fixme -v
         if((info.event.extendedProps.type == 'redmine' || info.event.extendedProps.type == 'otrs') && info.event.url)
         {
           window.open(info.event.url);
@@ -539,6 +510,7 @@
       //console.log('loading custom date', initialDate);
       calendarOptions.defaultDate = initialDate;
     }
+
     if(configuration.showOnlyBusinessHour)
     {
       calendarOptions.minTime = calendarOptions.businessHours[0].startTime;
@@ -599,6 +571,9 @@
         setCustomTheme();
       }
 
+      // force setup of tooltip if needed;
+      setupTooltips(configuration.showTooltips);
+
       configurationMenu.dialog('close');
     });
     setThemeInConfiguration();
@@ -615,39 +590,15 @@
 
   function finalize()
   {
-    redmineUpdateButton = $($('.fc-myRedmines-button')[0]);
-    redmineUpdateButton.data('default-text', redmineUpdateButton.text());
-
-    updateAssignedRedmines();
-
-    if(configuration.showTooltips)
+    if(hasRedmine)
     {
-      redmineUpdateButton.attr('title', 'Mise à jour des tickets en « assigné » ou en « watcher ». Ces tickets sont proposé lors de la création d\'une imputation de temps').tooltip()
+      redmineUpdateButton = $($('.fc-myRedmines-button')[0]);
+      redmineUpdateButton.data('default-text', redmineUpdateButton.text());
 
-      /**
-       * since it's not possible to specify other button texts, sets them here ...
-       */
-      $($('.fc-updateOtrs-button')[0]).attr('title', 'Mise à jour des tickets OTRS depuis metabase. Une mise à jour est faite automatiquement toutes les 10 minutes.').tooltip();
-      $($('.fc-updateRedmine-button')[0]).attr('title', 'Mise à jour des tickets Redmine depuis l\'api redmine. Une mise à jour est faite automatiquement toutes les 10 minutes.').tooltip();
-      $($('.fc-updateExchange-button')[0]).attr('title', 'Mise à jour du calendrier Exchange depuis l\'OWA. Une mise à jour est faite automatiquement toutes les 10 minutes.').tooltip();
-      $($('.fc-updateGitlab-button')[0]).attr('title', 'Mise à jour des imputation de temps dans les issues Gitlab depuis metabase. Une mise à jour est faite automatiquement toutes les 10 minutes.').tooltip();
-
-      $($('.fc-toggleOtrs-button')[0]).attr('title', 'Cacher/Afficher les événements OTRS').tooltip();
-      $($('.fc-toggleRedmine-button')[0]).attr('title', 'Cacher/Afficher les événements Redmine').tooltip();
-      $($('.fc-toggleExchange-button')[0]).attr('title', 'Cacher/Afficher les événements du calendrier Exchange (OWA)').tooltip();
-      $($('.fc-toggleGitlab-button')[0]).attr('title', 'Cacher/Afficher les événements Gitlab').tooltip();
-      $($('.fc-toggleOtrs-button')[0]).attr('title', 'Cacher/Afficher les événements OTRS').tooltip();
-
-      $($('.fc-timeGridWeek-button')[0]).attr('title', 'Passer à la vue hebdomadaire.').tooltip();
-      $($('.fc-timeGridDay-button')[0]).attr('title', 'Passer à la vue journalière.').tooltip();
-
-      $($('.fc-gotoMetabase-button')[0]).attr('title', 'Aller au tableau métabase (dans un nouvel onglet).').tooltip();
-      $($('.fc-gotoGitlab-button')[0]).attr('title', 'Aller sur le projet gitlab (dans un nouvel onglet).').tooltip();
-      $($('.fc-openBurgerMenu-button')[0]).attr('title', 'Configuration de l\'application.').tooltip();
-      $($('.fc-today-button')[0]).attr('title', 'Revenir au jour/à la semaine en cours.').tooltip();
-      $($('.fc-prev-button')[0]).attr('title', 'Passer à la semaine précédente / au jour précédent.').tooltip();
-      $($('.fc-next-button')[0]).attr('title', 'Passer à la semaine suivante / au jour suivant.').tooltip();
+      updateAssignedRedmines();
     }
+
+    setupTooltips(configuration.showTooltips);
 
     /**
      * on load, set button toggle to the user configuration state
@@ -660,6 +611,34 @@
     });
   } // end run
 
+  function setupTooltips(isEnabled)
+  {
+    var tooltipsOptions = {
+      disabled: !isEnabled,
+    };
+    //console.log('setup tooltips, tooltip as ', tooltipsOptions);
+    hasRedmine && redmineUpdateButton.attr('title', 'Mise à jour des tickets en « assigné » ou en « watcher ». Ces tickets sont proposé lors de la création d\'une imputation de temps').tooltip(tooltipsOptions)
+
+    /**
+     * since it's not possible to specify other button texts, sets them here ...
+     */
+    for(var key in plugins)
+    {
+      $('.fc-update_' + key + '-button').attr('title', plugins[key].tooltip.uptdate || '').tooltip(tooltipsOptions);
+      $('.fc-toggle_' + key + '-button').attr('title', plugins[key].tooltip.toggle || '').tooltip(tooltipsOptions);
+    }
+
+    $('.fc-timeGridWeek-button').attr('title', 'Passer à la vue hebdomadaire.').tooltip(tooltipsOptions);
+    $('.fc-timeGridDay-button').attr('title', 'Passer à la vue journalière.').tooltip(tooltipsOptions);
+
+    $('.fc-gotoMetabase-button').attr('title', 'Aller au tableau métabase (dans un nouvel onglet).').tooltip(tooltipsOptions);
+    $('.fc-gotoGitlab-button').attr('title', 'Aller sur le projet gitlab (dans un nouvel onglet).').tooltip(tooltipsOptions);
+    $('.fc-openBurgerMenu-button').attr('title', 'Configuration de l\'application.').tooltip(tooltipsOptions);
+    $('.fc-today-button').attr('title', 'Revenir au jour/à la semaine en cours.').tooltip(tooltipsOptions);
+    $('.fc-prev-button').attr('title', 'Passer à la semaine précédente / au jour précédent.').tooltip(tooltipsOptions);
+    $('.fc-next-button').attr('title', 'Passer à la semaine suivante / au jour suivant.').tooltip(tooltipsOptions);
+    //console.log('tooltip done');
+  }
   function setThemeInConfiguration()
   {
     for(var key in allowedThemes)
@@ -724,6 +703,10 @@
 
   function redmineObjCleanup()
   {
+    if(!hasRedmine)
+    {
+      return;
+    }
     elemDialog.find("#datetime").text("");
     //redmineId = redmineObj.val();
     redmineObj.val("");
@@ -734,7 +717,11 @@
 
   function showPopupToConvertToRedmine(event)
   {
-    //console.log('converting', event);
+    console.log('converting', event);
+    if(!plugins[event.extendedProps.type].convertible || !hasRedmine)
+    {
+      return;
+    }
     timeouts.redmine && clearTimeout(timeouts.redmine);
     redmineComment.val(event.title);
     createNewEvent(event);
@@ -806,109 +793,6 @@
       })
       ;
     }
-    //console.log('test', sources == 'all' || sources == 'otrs')
-    //if(sources == 'all' || sources == 'redmine')
-    //{
-    //  var btnUpdateRedmine = $($('.fc-updateRedmine-button')[0]);
-    //  btnUpdateRedmine.attr('disabled', 'disabled');
-    //
-    //  var urlRedmine = '/api/update?type=redmine' + dates;
-    //  $.getJSON(urlRedmine, function(data) {
-    //    //console.log(data);
-    //    $.each(data, function(k, v) {
-    //      v.durationEditable = v.resourceEditable = v.editable = (v.rid != '');
-    //      v.color = configuration.colorRedmine;
-    //      calendar.addEvent(v);
-    //      //console.log('adding to calendar');
-    //    });
-    //    timeouts.redmine = setTimeout(updateRedmine, 1000 * configuration.refresh);
-    //  })
-    //  .fail(function() {
-    //    alert('Impossible de mettre à jour depuis redmine');
-    //  })
-    //  .always(function() {
-    //    btnUpdateRedmine.removeAttr('disabled');
-    //  })
-    //  ;
-    //}
-    //if(sources == 'all' || sources == 'otrs')
-    //{
-    //  var btnUpdateOtrs = $($('.fc-updateOtrs-button')[0]);
-    //  btnUpdateOtrs.attr('disabled', 'disabled');
-    //
-    //  var urlOtrs = '/api/update?type=otrs' + dates;
-    //  $.getJSON(urlOtrs, function(data) {
-    //    //console.log('calling otrs', data);
-    //    $.each(data, function(k, v) {
-    //      v.durationEditable = false;
-    //      v.resourceEditable = false;
-    //      v.editable = false;
-    //      v.color = configuration.colorOtrs;
-    //      calendar.addEvent(v);
-    //    });
-    //    timeouts.otrs = setTimeout(updateOtrs, 1000 * configuration.refresh);
-    //  })
-    //  .fail(function() {
-    //    alert('Impossible de mettre à jour depuis otrs');
-    //  })
-    //  .always(function() {
-    //    btnUpdateOtrs.removeAttr('disabled');
-    //  })
-    //  ;
-    //}
-    //if(sources == 'all' || sources == 'exchange')
-    //{
-    //  var btnUpdateExchange = $($('.fc-updateExchange-button')[0]);
-    //  btnUpdateExchange.attr('disabled', 'disabled');
-    //
-    //  var urlExchange = '/api/update?type=exchange' + dates;
-    //  if(configuration.showMaskedEvents)
-    //  {
-    //    urlExchange += "&showMasked=1";
-    //  }
-    //  $.getJSON(urlExchange, function(data) {
-    //    //console.log(data);
-    //    $.each(data, function(k, v) {
-    //      v.durationEditable = false;
-    //      v.resourceEditable = false;
-    //      v.editable = false;
-    //      v.color = configuration.colorExchange;
-    //      calendar.addEvent(v);
-    //    });
-    //    timeouts.exchange = setTimeout(updateExchange, 1000 * configuration.refresh);
-    //  })
-    //  .fail(function() {
-    //    alert('Impossible de mettre à jour depuis exchange');
-    //  })
-    //  .always(function() {
-    //    btnUpdateExchange.removeAttr('disabled');
-    //  })
-    //  ;
-    //}
-    //if(sources == 'all' || sources == 'gitlab')
-    //{
-    //  var btnUpdateGitlab = $($('.fc-updateGitlab-button')[0]);
-    //  btnUpdateGitlab.attr('disabled', 'disabled');
-    //  var urlGitlab = '/api/update?type=gitlab' + dates;
-    //  $.getJSON(urlGitlab, function(data) {
-    //    //console.log(data);
-    //    $.each(data, function(k, v) {
-    //      v.durationEditable = false;
-    //      v.resourceEditable = false;
-    //      v.editable = false;
-    //      v.color = configuration.colorGitlab;
-    //      calendar.addEvent(v);
-    //    });
-    //    timeouts.gitlab = setTimeout(updateGitlab, 1000 * configuration.refresh);
-    //  })
-    //  .fail(function() {
-    //    alert('Impossible de mettre à jour depuis gitlab');
-    //  })
-    //  .always(function() {
-    //    btnUpdateGitlab.removeAttr('disabled');
-    //  })
-    //  ;
-    //}
   }
 
   function toggleElement(sourceType, button)
@@ -939,6 +823,10 @@
 
   function updateMyRedmines()
   {
+    if(!hasRedmine)
+    {
+      return;
+    }
     timeouts.assigne && clearTimeout(timeouts.assigne);
     $.getJSON('/api/redmine/assign', function(i) {
       redmineUpdateButton.text(redmineUpdateButton.data('default-text') + ' (' + i.count + ')');
