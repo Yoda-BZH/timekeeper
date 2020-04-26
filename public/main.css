@@ -62,3 +62,7 @@ html, body {
 
   animation: shadow-pulse 1s 10;
 }
+
+.fc-title-allday {
+  font-size: 1em;
+}

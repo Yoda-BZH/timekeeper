@@ -978,9 +978,9 @@
       var eventDate = event.start.getFullYear() + '-' + formatNumber(event.start.getMonth() + 1) + '-' + formatNumber(event.start.getDate());
       if(!accountedByDate[eventDate])
       {
-        accountedByDate[eventDate] = [];
+        accountedByDate[eventDate] = 0;
       }
-      accountedByDate[eventDate].push(difference);
+      accountedByDate[eventDate] += difference;
 
       if(!accountedByDateAndType[eventDate])
       {
@@ -989,21 +989,21 @@
 
       if(!accountedByDateAndType[eventDate][event.extendedProps.type])
       {
-        accountedByDateAndType[eventDate][event.extendedProps.type] = [];
+        accountedByDateAndType[eventDate][event.extendedProps.type] = 0;
       }
-      accountedByDateAndType[eventDate][event.extendedProps.type].push(difference);
+      accountedByDateAndType[eventDate][event.extendedProps.type] += difference;
     }
 
     //console.log('accounted', accountedByDate, accountedByDateAndType);
     for(var eventsDate in accountedByDate)
     {
       //console.log('treating ', eventsDate);
-      var sum = array_sum(accountedByDate[eventsDate]);
+      var sum = accountedByDate[eventsDate];
       var sumDetails = [];
       for(var eventType in accountedByDateAndType[eventDate])
       {
         //console.log('has to be show', accountedByDateAndType[eventDate][eventType]);
-        var sumForDateAndType = array_sum(accountedByDateAndType[eventDate][eventType]);
+        var sumForDateAndType = accountedByDateAndType[eventDate][eventType];
         if(0 == sumForDateAndType)
         {
           continue;
@@ -1022,6 +1022,7 @@
         allDay: true,
         extendedProps: { type: '__main', },
         color: configuration['color___main'],
+        classNames: ['fc-title-allday'],
       };
       //console.log('event added', accountedEvent);
       var r = calendar.addEvent(accountedEvent);
@@ -1037,12 +1038,6 @@
     var minutes = minutes % 60;
 
     return formatNumber(hours) + ':' + formatNumber(minutes);
-  }
-
-  function array_sum(arr){
-    return arr.reduce(function(a,b){
-      return a + b
-    }, 0);
   }
 
   TimeKeeper = {
