@@ -433,10 +433,10 @@
 
     header.left = header.left.join(' ');
 
-    console.log('header.right', header.right);
+    //console.log('header.right', header.right);
 
     var customButtons = { ...customButtonsUpdate, ...customButtonsToggle, ...actionsUserCustomButtons, ...otherUserCustomButtons, ...customButtonBurger};
-    console.log(customButtons);
+    //console.log(customButtons);
 
     calendarOptions = {
       themeSystem: 'bootstrap',
@@ -529,15 +529,10 @@
 
     var calendarEl = document.getElementById('calendar');
     calendar = new FullCalendar.Calendar(calendarEl, calendarOptions);
-    //var calendar = $('#calendar').fullCalendar(calendarOptions);
 
     btnConfigurationSave.bind('click', function()
     {
       var oldTheme = configuration.theme;
-      //localStorage.setItem("colorOtrs",             configuration.colorOtrs = $("#idColorOtrs").val());
-      //localStorage.setItem("colorRedmine",          configuration.colorRedmine = $("#idColorRedmine").val());
-      //localStorage.setItem("colorExchange",         configuration.colorExchange = $("#idColorExchange").val());
-      //localStorage.setItem("colorGitlab",           configuration.colorGitlab = $("#idColorGitlab").val());
       localStorage.setItem("showWeekend",           configuration.showWeekend = $("#showWeekend").prop('checked'));
       localStorage.setItem("businessHourStart",     configuration.businessHourStart = $("#businessHourStart").val());
       localStorage.setItem("businessHourEnd",       configuration.businessHourEnd = $("#businessHourEnd").val());
@@ -608,7 +603,7 @@
       updateAssignedRedmines();
     }
 
-    setupTooltips(configuration.showTooltips, true);
+    setupTooltips(configuration.showTooltips);
 
     /**
      * on load, set button toggle to the user configuration state
@@ -621,18 +616,20 @@
     });
   }
 
-  function setupTooltips(isEnabled, reset)
+  function setupTooltips(isEnabled)
   {
-    reset = !!reset;
-    console.log('setup tooltips');
+    if(!isEnabled)
+    {
+      //console.log('tooltips are disabled');
+      return;
+    }
+    //reset = !!reset;
+    //console.log('setup tooltips');
     if(hasRedmine)
     {
-      if(reset)
-      {
-        redmineUpdateButton.attr('title', 'Mise à jour des tickets en « assigné » ou en « watcher ». Ces tickets sont proposé lors de la création d\'une imputation de temps');
-      }
+      redmineUpdateButton.attr('title', 'Mise à jour des tickets en « assigné » ou en « watcher ». Ces tickets sont proposé lors de la création d\'une imputation de temps');
       redmineUpdateButton.tooltip();
-      redmineUpdateButton.tooltip('option', 'disabled', !isEnabled); 
+      //redmineUpdateButton.tooltip('option', 'disabled', !isEnabled); 
     }
 
     /**
@@ -648,50 +645,47 @@
     var prev = $('.fc-prev-button');
     var next = $('.fc-next-button');
 
-    if(reset)
-    {
-      timeGridWeek.attr('title', 'Passer à la vue hebdomadaire.');
-      timeGridDay.attr('title', 'Passer à la vue journalière.');
-      gotoMetabase.attr('title', 'Aller au tableau métabase (dans un nouvel onglet).');
-      gotoGitlab.attr('title', 'Aller sur le projet gitlab (dans un nouvel onglet).');
-      openBurgerMenu.attr('title', 'Configuration de l\'application.');
-      today.attr('title', 'Revenir au jour/à la semaine en cours.');
-      prev.attr('title', 'Passer à la semaine précédente / au jour précédent.');
-      next.attr('title', 'Passer à la semaine suivante / au jour suivant.');
+    timeGridWeek.attr('title', 'Passer à la vue hebdomadaire.');
+    timeGridDay.attr('title', 'Passer à la vue journalière.');
+    gotoMetabase.attr('title', 'Aller au tableau métabase (dans un nouvel onglet).');
+    gotoGitlab.attr('title', 'Aller sur le projet gitlab (dans un nouvel onglet).');
+    openBurgerMenu.attr('title', 'Configuration de l\'application.');
+    today.attr('title', 'Revenir au jour/à la semaine en cours.');
+    prev.attr('title', 'Passer à la semaine précédente / au jour précédent.');
+    next.attr('title', 'Passer à la semaine suivante / au jour suivant.');
 
-      timeGridWeek.tooltip();
-      timeGridDay.tooltip();
-      gotoMetabase.tooltip();
-      gotoGitlab.tooltip();
-      openBurgerMenu.tooltip();
-      today.tooltip();
-      prev.tooltip();
-      next.tooltip();
-    }
-    timeGridWeek.tooltip('option', 'disabled', !isEnabled);
-    timeGridDay.tooltip('option', 'disabled', !isEnabled);
-    gotoMetabase.tooltip('option', 'disabled', !isEnabled);
-    gotoGitlab.tooltip('option', 'disabled', !isEnabled);
-    openBurgerMenu.tooltip('option', 'disabled', !isEnabled);
-    today.tooltip('option', 'disabled', !isEnabled);
-    prev.tooltip('option', 'disabled', !isEnabled);
-    next.tooltip('option', 'disabled', !isEnabled);
+    timeGridWeek.tooltip();
+    timeGridDay.tooltip();
+    gotoMetabase.tooltip();
+    gotoGitlab.tooltip();
+    openBurgerMenu.tooltip();
+    today.tooltip();
+    prev.tooltip();
+    next.tooltip();
+    //timeGridWeek.tooltip('option', 'disabled', !isEnabled);
+    //timeGridDay.tooltip('option', 'disabled', !isEnabled);
+    //gotoMetabase.tooltip('option', 'disabled', !isEnabled);
+    //gotoGitlab.tooltip('option', 'disabled', !isEnabled);
+    //openBurgerMenu.tooltip('option', 'disabled', !isEnabled);
+    //today.tooltip('option', 'disabled', !isEnabled);
+    //prev.tooltip('option', 'disabled', !isEnabled);
+    //next.tooltip('option', 'disabled', !isEnabled);
 
     for(var key in plugins)
     {
       var update = $('.fc-update_' + key + '-button');
       var toggle = $('.fc-toggle_' + key + '-button');
-      if(reset)
-      {
-        update.attr('title', plugins[key].tooltip.update || '');
-        toggle.attr('title', plugins[key].tooltip.toggle || '');
-      }
+      //if(reset)
+      //{
+        update.attr('title', (plugins[key].tooltip.update || 'update'));
+        toggle.attr('title', (plugins[key].tooltip.toggle || 'toggle'));
+      //}
       update.tooltip();
       toggle.tooltip();
-      update.tooltip('option', 'disabled', !isEnabled); 
-      toggle.tooltip('option', 'disabled', !isEnabled); 
+      //update.tooltip('option', 'disabled', !isEnabled); 
+      //toggle.tooltip('option', 'disabled', !isEnabled); 
     }
-    console.log('tooltip done');
+    //console.log('tooltip done');
   }
 
   function setThemeInConfiguration()
