@@ -598,7 +598,7 @@
       updateAssignedRedmines();
     }
 
-    setupTooltips(configuration.showTooltips);
+    setupTooltips(configuration.showTooltips, true);
 
     /**
      * on load, set button toggle to the user configuration state
@@ -609,36 +609,83 @@
       updateButtonStatus(sourceType, this);
       //console.log(this);
     });
+
+    $("#configuration-showTooltips").mouseover().mouseout();
   } // end run
 
-  function setupTooltips(isEnabled)
+  function setupTooltips(isEnabled, reset)
   {
-    var tooltipsOptions = {
-      disabled: !isEnabled,
-    };
-    //console.log('setup tooltips, tooltip as ', tooltipsOptions);
-    hasRedmine && redmineUpdateButton.attr('title', 'Mise à jour des tickets en « assigné » ou en « watcher ». Ces tickets sont proposé lors de la création d\'une imputation de temps').tooltip(tooltipsOptions)
+    reset = !!reset;
+    console.log('setup tooltips');
+    if(hasRedmine)
+    {
+      if(reset)
+      {
+        redmineUpdateButton.attr('title', 'Mise à jour des tickets en « assigné » ou en « watcher ». Ces tickets sont proposé lors de la création d\'une imputation de temps');
+      }
+      redmineUpdateButton.tooltip();
+      redmineUpdateButton.tooltip('option', 'disabled', !isEnabled); 
+    }
 
     /**
      * since it's not possible to specify other button texts, sets them here ...
      */
+
+    var timeGridWeek = $('.fc-timeGridWeek-button');
+    var timeGridDay = $('.fc-timeGridDay-button');
+    var gotoMetabase = $('.fc-gotoMetabase-button');
+    var gotoGitlab = $('.fc-gotoGitlab-button');
+    var openBurgerMenu = $('.fc-openBurgerMenu-button');
+    var today = $('.fc-today-button');
+    var prev = $('.fc-prev-button');
+    var next = $('.fc-next-button');
+
+    if(reset)
+    {
+      timeGridWeek.attr('title', 'Passer à la vue hebdomadaire.');
+      timeGridDay.attr('title', 'Passer à la vue journalière.');
+      gotoMetabase.attr('title', 'Aller au tableau métabase (dans un nouvel onglet).');
+      gotoGitlab.attr('title', 'Aller sur le projet gitlab (dans un nouvel onglet).');
+      openBurgerMenu.attr('title', 'Configuration de l\'application.');
+      today.attr('title', 'Revenir au jour/à la semaine en cours.');
+      prev.attr('title', 'Passer à la semaine précédente / au jour précédent.');
+      next.attr('title', 'Passer à la semaine suivante / au jour suivant.');
+
+      timeGridWeek.tooltip();
+      timeGridDay.tooltip();
+      gotoMetabase.tooltip();
+      gotoGitlab.tooltip();
+      openBurgerMenu.tooltip();
+      today.tooltip();
+      prev.tooltip();
+      next.tooltip();
+    }
+    timeGridWeek.tooltip('option', 'disabled', !isEnabled);
+    timeGridDay.tooltip('option', 'disabled', !isEnabled);
+    gotoMetabase.tooltip('option', 'disabled', !isEnabled);
+    gotoGitlab.tooltip('option', 'disabled', !isEnabled);
+    openBurgerMenu.tooltip('option', 'disabled', !isEnabled);
+    today.tooltip('option', 'disabled', !isEnabled);
+    prev.tooltip('option', 'disabled', !isEnabled);
+    next.tooltip('option', 'disabled', !isEnabled);
+
     for(var key in plugins)
     {
-      $('.fc-update_' + key + '-button').attr('title', plugins[key].tooltip.uptdate || '').tooltip(tooltipsOptions);
-      $('.fc-toggle_' + key + '-button').attr('title', plugins[key].tooltip.toggle || '').tooltip(tooltipsOptions);
+      var update = $('.fc-update_' + key + '-button');
+      var toggle = $('.fc-toggle_' + key + '-button');
+      if(reset)
+      {
+        update.attr('title', plugins[key].tooltip.update || '');
+        toggle.attr('title', plugins[key].tooltip.toggle || '');
+      }
+      update.tooltip();
+      toggle.tooltip();
+      update.tooltip('option', 'disabled', !isEnabled); 
+      toggle.tooltip('option', 'disabled', !isEnabled); 
     }
-
-    $('.fc-timeGridWeek-button').attr('title', 'Passer à la vue hebdomadaire.').tooltip(tooltipsOptions);
-    $('.fc-timeGridDay-button').attr('title', 'Passer à la vue journalière.').tooltip(tooltipsOptions);
-
-    $('.fc-gotoMetabase-button').attr('title', 'Aller au tableau métabase (dans un nouvel onglet).').tooltip(tooltipsOptions);
-    $('.fc-gotoGitlab-button').attr('title', 'Aller sur le projet gitlab (dans un nouvel onglet).').tooltip(tooltipsOptions);
-    $('.fc-openBurgerMenu-button').attr('title', 'Configuration de l\'application.').tooltip(tooltipsOptions);
-    $('.fc-today-button').attr('title', 'Revenir au jour/à la semaine en cours.').tooltip(tooltipsOptions);
-    $('.fc-prev-button').attr('title', 'Passer à la semaine précédente / au jour précédent.').tooltip(tooltipsOptions);
-    $('.fc-next-button').attr('title', 'Passer à la semaine suivante / au jour suivant.').tooltip(tooltipsOptions);
-    //console.log('tooltip done');
+    console.log('tooltip done');
   }
+
   function setThemeInConfiguration()
   {
     for(var key in allowedThemes)
