@@ -29,6 +29,7 @@
     <script src="{{ asset('fullcalendar-4.4.0/packages/interaction/main.min.js') }}"></script>
     <script src="{{ asset('fullcalendar-4.4.0/packages/bootstrap/main.min.js') }}"></script>
     <script src="{{ asset('fullcalendar-4.4.0/packages/core/locales/fr.js') }}"></script>
+    <script src="{{ asset('js/notify.min.js') }}"></script>
 
     <script src="main.js"></script>
     <script>
@@ -97,22 +98,22 @@
         </div>
       </div>
 
-      <div class="custom-control custom-checkbox">
+      <div id="configuration-showWeekend" class="custom-control custom-checkbox">
         <input class="custom-control-input" type="checkbox" name="showWeekend" id="showWeekend" />
         <label class="custom-control-label" for="showWeekend">Afficher le weekend</label>
       </div>
 
-      <div class="custom-control custom-checkbox">
+      <div id="configuration-showOnlyBusinessHours" class="custom-control custom-checkbox">
         <input class="custom-control-input" type="checkbox" id="idShowOnlyBusinessHour" />
         <label title="L'affichage du calendrier se fera uniquement entre l'heure de d&eacute;but de journ&eacute;e et l'heure de fin de journ&eacute;e." class="custom-control-label" for="idShowOnlyBusinessHour">Afficher que les heures ouvr&eacute;s</label>
       </div>
 
-      <div class="custom-control custom-checkbox">
+      <div id="configuration-showTooltips" class="custom-control custom-checkbox">
         <input class="custom-control-input" type="checkbox" id="showTooltips" />
         <label class="custom-control-label" for="showTooltips">Afficher les bulles d'aides (tooltips)</label>
       </div>
 
-      <div class="custom-control custom-checkbox">
+      <div id="configuration-showMaskedEvents" class="custom-control custom-checkbox">
         <input class="custom-control-input" type="checkbox" id="showMaskedEvents" />
         <label title="Les &eacute;v&eacute;nements exchange sont masqu&eacute;s quand ils sont convertis en imputation redmine ou &agrave; la demande. Cette option permet de les afficher quand m&ecirc;me. Le changement de cette option n&eacute;cessite de rafra&icirc;chir les &eacute;v&eacute;nements exchange, ou d'attendre le prochain rafra&icirc;chissement automatique." class="custom-control-label" for="showMaskedEvents">Afficher &eacute;v&eacute;nements masqu&eacute;s</label>
       </div>
