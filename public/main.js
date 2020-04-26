@@ -619,9 +619,7 @@
       updateButtonStatus(sourceType, this);
       //console.log(this);
     });
-
-    //$("#configuration-showTooltips").mouseover().mouseout();
-  } // end run
+  }
 
   function setupTooltips(isEnabled, reset)
   {
