@@ -4,24 +4,40 @@ var plugins = {
     color: "#2B35B5",
     resize: false,
     convertible: false,
+    tooltip: {
+      uptdate: 'Mise à jour des tickets OTRS depuis metabase. Une mise à jour est faite automatiquement toutes les 10 minutes.',
+      toggle: 'Cacher/Afficher les événements OTRS',
+    },
   },
   'redmine': {
     name: 'Redmine',
     color: "#EA7D73",
     resize: true,
     convertible: false, // not relevant here, won't convert redmine to redmine
+    tooltip: {
+      update: 'Mise à jour des tickets Redmine depuis l\'api redmine. Une mise à jour est faite automatiquement toutes les 10 minutes.',
+      toggle: 'Cacher/Afficher les événements Redmine',
+    },
   },
   'exchange': {
     name: 'Exchange',
     color: "#73DDEA",
     resize: false,
     convertible: true,
+    tooltip: {
+      update: 'Mise à jour du calendrier Exchange depuis l\'OWA. Une mise à jour est faite automatiquement toutes les 10 minutes.',
+      toggle: 'Cacher/Afficher les événements du calendrier Exchange (OWA)',
+    },
   },
   'gitlab': {
     name: 'Gitlab',
     color: "#FFB57C",
     resize: false,
     convertible: false,
+    tooltip: {
+      update: 'Mise à jour des imputation de temps dans les issues Gitlab depuis metabase. Une mise à jour est faite automatiquement toutes les 10 minutes.',
+      toggle: 'Cacher/Afficher les événements Gitlab',
+    },
   },
 };
 
