@@ -25,3 +25,75 @@ services:
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
+
+    Symfony\Component\Ldap\Ldap:
+        arguments: ['@Symfony\Component\Ldap\Adapter\ExtLdap\Adapter']
+
+    ##
+    # Configure here your active directory - ldap address
+    Symfony\Component\Ldap\Adapter\ExtLdap\Adapter:
+        arguments:
+            -   host: ldap.example.com
+                port: 389
+                encryption: tls
+                options:
+                    protocol_version: 3
+                    referrals: false
+
+    ##
+    # Configure here how your users should authenticate
+    App\Services\AdAuthenticator\AdUserLdapProvider:
+        arguments:
+            $ldap: '@Symfony\Component\Ldap\Ldap'
+            $baseDn: 'DC=EXAMPLE,DC=COM'
+            $searchDn: 'DC=EXAMPLE,DC=COM'
+            $searchPassword: null
+            $defaultRoles: ['ROLE_USER']
+            $filter: '({uid_key}={username})'
+            $uidKey: 'sAMAccountName' # may be uid for openldap
+            $domain: 'mydomain'
+
+    ##
+    # List in $connectors all the plugins you want activated
+    App\Services\Connectors\Manager:
+        arguments:
+            $connectors: [ '@App\Services\Connectors\Redmine', '@App\Services\Connectors\Otrs', '@App\Services\Connectors\Gitlab', '@App\Services\Connectors\Exchange' ]
+
+    ##
+    # For Redmine, configure the url
+    App\Services\Connectors\Redmine:
+        arguments:
+            $redmineUrl: 'https://redmine.example.com'
+
+    ##
+    # For exchange/office365 calendar, configure here the address of your exchange servers
+    # For office365, use outlook.office365.com
+    # for internal servers, it may be something like owa.example.com
+    App\Services\Connectors\Exchange:
+        arguments:
+            $emailServer: 'outlook.office365.com'
+            # $emailServer: 'owa.example.com'
+            $domain: 'MYDOMAIN'
+
+    ##
+    # For OTRS entries, well everything is pre-computed in metabase
+    # Configure here the metabase url, the query url and it's parameters
+    App\Services\Connectors\Otrs:
+        arguments:
+            $metabase: 'https://metabase.example.com'
+            $queryUrl: '/api/public/card/<uuid>/query/json?'
+            $queryParameters: 'parameters=[{"type":"date/single","target":["variable",["template-tag","dat"]],"value":"%%s"},{"type":"date/single","target":["variable",["template-tag","dat_fin"]],"value":"%%s"},{"type":"category","target":["variable",["template-tag","users"]],"value":"%%s"}]'
+
+    ##
+    # For Gitlab entries, well everything is pre-computed in metabase
+    # Configure here the metabase url, the query url and it's parameters
+    App\Services\Connectors\Gitlab:
+        arguments:
+            $metabase: 'https://metabase.example.com'
+            $queryUrl: '/api/public/card/<uuid>/query/json?'
+            $queryParameters: 'parameters=[{"type":"date/single","target":["variable",["template-tag","dat"]],"value":"%%s"},{"type":"date/single","target":["variable",["template-tag","dat_fin"]],"value":"%%s"},{"type":"category","target":["variable",["template-tag","users"]],"value":"%%s"}]'
+
+    ##
+    # Declare here any connectors you may need
+    # and add them in the $connectors parameters for App\Services\Connectors\Manager
+    #

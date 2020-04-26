@@ -1,14 +1,27 @@
 security:
+    encoders:
+        Symfony\Component\Ldap\Security\User:
+            algorithm: auto
     # https://symfony.com/doc/current/security.html#where-do-users-come-from-user-providers
     providers:
-        users_in_memory: { memory: null }
+        my_ldap_provider:
+            id: 'App\Services\AdAuthenticator\AdUserLdapProvider'
+
     firewalls:
         dev:
             pattern: ^/(_(profiler|wdt)|css|images|js)/
             security: false
         main:
-            anonymous: lazy
-            provider: users_in_memory
+            stateless: true
+            http_basic_ldap:
+                service: Symfony\Component\Ldap\Ldap
+                # this referes to security.providers.my_ldap_provider
+                provider: my_ldap_provider
+
+                ##
+                # Configure here the domain part of your users login
+                dn_string: 'mydomain\{username}'
+            #anonymous: lazy
 
             # activate different ways to authenticate
             # https://symfony.com/doc/current/security.html#firewalls-authentication
@@ -21,3 +34,5 @@ security:
     access_control:
         # - { path: ^/admin, roles: ROLE_ADMIN }
         # - { path: ^/profile, roles: ROLE_USER }
+        - { path: ^/$, roles: ROLE_USER }
+        - { path: ^/api, roles: ROLE_USER }

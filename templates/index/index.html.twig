@@ -1,0 +1,135 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}TimeKeeper2{% endblock %}
+
+{% block stylesheets %}
+    <link href="{{ asset('fullcalendar-4.4.0/packages/core/main.min.css') }}" rel='stylesheet' />
+    <!--<link href="{{ asset('fullcalendar-4.4.0/packages/daygrid/main.css') }}" rel='stylesheet' />-->
+    <link href="{{ asset('fullcalendar-4.4.0/packages/timegrid/main.min.css') }}" rel='stylesheet' />
+    <link href="{{ asset('fullcalendar-4.4.0/packages/list/main.min.css') }}" rel='stylesheet' />
+    <!--<link href="{{ asset('fullcalendar-4.4.0/packages/interaction/main.css') }}" rel='stylesheet' />-->
+    <link href="{{ asset('fullcalendar-4.4.0/packages/bootstrap/main.min.css') }}" rel='stylesheet' />
+    <link href="{{ asset('jquery-ui-1.12.1.custom/jquery-ui.min.css') }}" rel='stylesheet' />
+    <link href="{{ asset('main.css') }}" rel='stylesheet' />
+    <link href='https://use.fontawesome.com/releases/v5.0.6/css/all.css' rel='stylesheet'>
+    <link data-theme="theme" rel="stylesheet" href="" integrity="" crossorigin="anonymous">
+{% endblock %}
+
+{% block javascripts %}
+    <script crossorigin="anonymous" src="https://polyfill.io/v3/polyfill.min.js?features=es2015%2Ces2016%2Ces2017%2Ces5%2Ces6%2CObject.assign%2Ces2018%2Ces7%2Cdefault"></script>
+
+    <script src="{{ asset('jquery-3.5.0.min.js') }}"></script>
+
+    <script src="{{ asset('jquery-ui-1.12.1.custom/jquery-ui.min.js') }}"></script>
+
+    <script src="{{ asset('fullcalendar-4.4.0/packages/core/main.min.js') }}"></script>
+    <script src="{{ asset('fullcalendar-4.4.0/packages/daygrid/main.min.js') }}"></script>
+    <script src="{{ asset('fullcalendar-4.4.0/packages/timegrid/main.min.js') }}"></script>
+    <script src="{{ asset('fullcalendar-4.4.0/packages/list/main.min.js') }}"></script>
+    <script src="{{ asset('fullcalendar-4.4.0/packages/interaction/main.min.js') }}"></script>
+    <script src="{{ asset('fullcalendar-4.4.0/packages/bootstrap/main.min.js') }}"></script>
+    <script src="{{ asset('fullcalendar-4.4.0/packages/core/locales/fr.js') }}"></script>
+
+    <script src="main.js"></script>
+    <script>
+{% include 'timekeeper-config.js.twig' %}
+    </script>
+{% endblock %}
+
+{% block body %}
+<div id="IE">
+  <h1>Chargement de TimeKeeper en cours ...</h1>
+  <p>Si ce message est persistant, l'application n'arrive pas interprêter le javascript, ou notre navigateur n'est malheureusement pas compatible.</p>
+</div>
+  <div id='calendar-container'>
+    <div id='calendar'></div>
+  </div>
+
+  <div id="createNew" class="ui-front" title="Nouvel &eacute;v&eacute;nement">
+    <form>
+      <p id="datetime"></p>
+      <p>
+        <label for="idRedmine">Redmine: </label>
+        <input type="text" name="idRedmine" id="idRedmine" />
+      </p>
+        <p id="redmineText"></p>
+      <p>
+        <label for="idComment">Commentaire: </label>
+        <input type="text" name="idComment" id="idComment" />
+      </p>
+      <p>
+        <input id="timeentryAdd"    class="btn btn-primary" type="button" value="Valider" disabled />
+        <input id="timeentryCancel" class="btn btn-primary" type="button" value="Annuler" />
+      </p>
+    </form>
+    <hr />
+    <form>
+      <input id="hideEvent" class="btn btn-primary" type="button" value="Cacher l'&eacute;l&eacute;ment" />
+    </form>
+  </div>
+
+  <div id="mainMenu" class="ui-front" title="Configuration">
+    <form>
+      <div id="configuration-colors">
+        <div id="configuration-colors-color-template" class="form-row">
+          <div class="form-group col-md-6">
+            <label for="idColor">Couleur</label>
+            <input class="form-control" type="color" id="idColor_" value="" />
+          </div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group col-md-6">
+          <label for="idBusinessHourStart">Heure de d&eacute;but de journ&eacute;e</label>
+          <input class="form-control" type="time" id="businessHourStart" value="" />
+        </div>
+
+        <div class="form-group col-md-6">
+          <label for="idBusinessHourEnd">Heure de fin de journ&eacute;e</label>
+          <input class="form-control" type="time" id="businessHourEnd" value="" />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group col-md-6">
+          <label for="idBusinessHourEndFri">Heure de fin de journ&eacute;e le vendredi</label>
+          <input class="form-control" type="time" id="businessHourEndFri" value="" />
+        </div>
+      </div>
+
+      <div class="custom-control custom-checkbox">
+        <input class="custom-control-input" type="checkbox" name="showWeekend" id="showWeekend" />
+        <label class="custom-control-label" for="showWeekend">Afficher le weekend</label>
+      </div>
+
+      <div class="custom-control custom-checkbox">
+        <input class="custom-control-input" type="checkbox" id="idShowOnlyBusinessHour" />
+        <label title="L'affichage du calendrier se fera uniquement entre l'heure de d&eacute;but de journ&eacute;e et l'heure de fin de journ&eacute;e." class="custom-control-label" for="idShowOnlyBusinessHour">Afficher que les heures ouvr&eacute;s</label>
+      </div>
+
+      <div class="custom-control custom-checkbox">
+        <input class="custom-control-input" type="checkbox" id="showTooltips" />
+        <label class="custom-control-label" for="showTooltips">Afficher les bulles d'aides (tooltips)</label>
+      </div>
+
+      <div class="custom-control custom-checkbox">
+        <input class="custom-control-input" type="checkbox" id="showMaskedEvents" />
+        <label title="Les &eacute;v&eacute;nements exchange sont masqu&eacute;s quand ils sont convertis en imputation redmine ou &agrave; la demande. Cette option permet de les afficher quand m&ecirc;me. Le changement de cette option n&eacute;cessite de rafra&icirc;chir les &eacute;v&eacute;nements exchange, ou d'attendre le prochain rafra&icirc;chissement automatique." class="custom-control-label" for="showMaskedEvents">Afficher &eacute;v&eacute;nements masqu&eacute;s</label>
+      </div>
+
+      <div class="form-group">
+        <label title="L'application rafra&icirc;chit p&eacute;riodiquement les &eacute;v&eacute;nements des calendriers" for="refreshTimer">P&eacute;riode de rafra&icirc;chissement des donn&eacute;es (secondes)</label>
+        <input class="form-control" type="number" id="refreshTimer" disabled />
+      </div>
+
+      <div class="form-group">
+        <label title="theme du calendrier" for="themeName">Th&egrave;me</label>
+        <select name="themeName" id="themeName"></select>
+      </div>
+
+      <div class="form-group">
+        <input class="btn btn-primary" type="button" id="configurationSave" value="Enregistrer la configuration" />
+      </div>
+    </form>
+  </div>
+{% endblock %}

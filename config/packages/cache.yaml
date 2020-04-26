@@ -17,3 +17,4 @@ framework:
         # Namespaced pools use the above "app" backend by default
         #pools:
             #my.dedicated.cache: null
+        app: cache.adapter.memcached

@@ -1,0 +1,42 @@
+var plugins = {
+  'otrs': {
+    name: 'OTRS',
+    color: "#2B35B5",
+    resize: false,
+    convertible: false,
+  },
+  'redmine': {
+    name: 'Redmine',
+    color: "#EA7D73",
+    resize: true,
+    convertible: false, // not relevant here, won't convert redmine to redmine
+  },
+  'exchange': {
+    name: 'Exchange',
+    color: "#73DDEA",
+    resize: false,
+    convertible: true,
+  },
+  'gitlab': {
+    name: 'Gitlab',
+    color: "#FFB57C",
+    resize: false,
+    convertible: false,
+  },
+};
+
+
+var options = {
+  actionsCustomButtons: {
+    myRedmines: {
+      text: "Mes redmines",
+      click: function() {}, //updateMyRedmines,
+    },
+  },
+  otherCustomButtons: {
+  }
+};
+timekeeper = TimeKeeper;
+timekeeper.initialize(options, plugins);
+timekeeper.run();
+timekeeper.finalize();

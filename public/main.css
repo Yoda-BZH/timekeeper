@@ -1,0 +1,64 @@
+/**
+ * https://github.com/fullcalendar/fullcalendar/blob/master/examples/full-height.html
+*/
+
+html, body {
+  overflow: hidden; /* don't do scrollbars */
+  font-family: Arial, Helvetica Neue, Helvetica, sans-serif;
+  font-size: 14px;
+}
+
+#calendar-container {
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 100vh;
+}
+
+.demo-topbar { /* will be stripped out */
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+}
+
+.demo-topbar + #calendar-container { /* will be stripped out */
+  top: 40px;
+}
+
+.calendar-parent {
+}
+
+.fc-header-toolbar {
+  /*
+  the calendar will be butting up against the edges,
+  but let's scoot in the header's buttons
+  */
+  height: 0px;
+  padding: 2em;
+}
+/** pour que l'autocomplete sorte de la boite au besoin */
+#createNew { z-index: 100;
+  overflow: visible;
+}
+.fc-today.alert-info {
+  opacity: 0.6;
+}
+
+
+@keyframes shadow-pulse
+{
+  0% {
+    box-shadow: 0 0 0 0px rgba(0, 0, 0, 0.4);
+  }
+  100% {
+    box-shadow: 0 0 0 35px rgba(0, 0, 0, 0);
+  }
+}
+
+.pulsating-button {
+
+  animation: shadow-pulse 1s 10;
+}
