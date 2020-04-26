@@ -19,6 +19,7 @@
   var redmineComment = undefined;
   var redmineText = undefined;
 
+  // fixme create a timeout managed
   var timeouts = {
     otrs: undefined,
     redmine: undefined,
@@ -57,15 +58,8 @@
   var btnConfigurationSave = undefined;
 
   var plugins = {};
-  
-  var notifyOptions = {
-    temporary: {},
-    permanent: {
-      clickToHide: true,
-      autoHide: false,
-      style: 'bootstrap',
-    },
-  }
+
+  var notifyOptions = {};
 
   function convertSessionStorageToLocalStorage()
   {
@@ -106,6 +100,15 @@
       localStorage.removeItem("colorExchange");
       localStorage.removeItem("colorGitlab");
     }
+
+    notifyOptions = {
+      temporary: {},
+      permanent: {
+        clickToHide: true,
+        autoHide: false,
+        style: 'bootstrap',
+      },
+    };
 
     defaultConfiguration = {
       showWeekend: true,
@@ -584,8 +587,7 @@
     setThemeInConfiguration();
     setCustomTheme();
 
-    $("#IE").remove();
-
+    $("#loading-timekeeper").remove();
   }
 
   function run()
@@ -629,7 +631,7 @@
     {
       redmineUpdateButton.attr('title', 'Mise à jour des tickets en « assigné » ou en « watcher ». Ces tickets sont proposé lors de la création d\'une imputation de temps');
       redmineUpdateButton.tooltip();
-      //redmineUpdateButton.tooltip('option', 'disabled', !isEnabled); 
+      //redmineUpdateButton.tooltip('option', 'disabled', !isEnabled);
     }
 
     /**
@@ -682,8 +684,8 @@
       //}
       update.tooltip();
       toggle.tooltip();
-      //update.tooltip('option', 'disabled', !isEnabled); 
-      //toggle.tooltip('option', 'disabled', !isEnabled); 
+      //update.tooltip('option', 'disabled', !isEnabled);
+      //toggle.tooltip('option', 'disabled', !isEnabled);
     }
     //console.log('tooltip done');
   }
