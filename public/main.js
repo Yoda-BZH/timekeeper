@@ -57,6 +57,15 @@
   var btnConfigurationSave = undefined;
 
   var plugins = {};
+  
+  var notifyOptions = {
+    temporary: {},
+    permanent: {
+      clickToHide: true,
+      autoHide: false,
+      style: 'bootstrap',
+    },
+  }
 
   function convertSessionStorageToLocalStorage()
   {
@@ -251,7 +260,8 @@
           calendar.addEvent(newEntry);
         })
         .fail(function() {
-          alert('Impossible de créer l\'entrées');
+          //alert('Impossible de créer l\'entrées');
+          $.notify('Impossible de créer l\'entrées', notifyOptions.permanent);
         })
         .always(function() {
           updateRedmine()
@@ -610,7 +620,7 @@
       //console.log(this);
     });
 
-    $("#configuration-showTooltips").mouseover().mouseout();
+    //$("#configuration-showTooltips").mouseover().mouseout();
   } // end run
 
   function setupTooltips(isEnabled, reset)
@@ -833,7 +843,8 @@
         timeouts[tksource] = setTimeout(plugins[tksource].updateCallback, 1000 * configuration.refresh);
       }})
       .fail(function() {
-        alert('Impossible de mettre à jour depuis ' + this.tksource);
+        //alert('Impossible de mettre à jour depuis ' + this.tksource);
+        $.notify('Impossible de mettre à jour depuis la source "' + this.tksource + '"', notifyOptions.permanent);
       })
       .always(function() {
         $($('.fc-update_' + this.tksource + '-button')[0]).removeAttr('disabled');
@@ -879,7 +890,8 @@
       redmineUpdateButton.text(redmineUpdateButton.data('default-text') + ' (' + i.count + ')');
     })
     .fail(function() {
-      alert('Impossible de mettre a jour le nombre d\'issue redmine');
+      //alert('Impossible de mettre a jour le nombre d\'issue redmine');
+      $.notify('Impossible de mettre a jour le nombre d\'issue redmine', notifyOptions.permanent);
     })
     .always(function() {
       timeouts.assigne = setTimeout(updateMyRedmines, 1000 * configuration.refresh);
@@ -906,7 +918,8 @@
       // todo
     })
     .fail(function() {
-      alert('Impossible de mettre a jour l\'entrée');
+      //alert('Impossible de mettre a jour l\'entrée');
+      $.notify('Impossible de mettre a jour l\'entrée "' + info.event.extendedProps.type + '"', notifyOptions.permanent);
     })
     ;
   };
@@ -929,7 +942,8 @@
       //console && console.log('loaded ', issues.count, 'issues for this user');
     })
     .fail(function() {
-      alert('Impossible de mettre à jour depuis redmine');
+      //alert('Impossible de mettre à jour depuis redmine');
+      $.notify('Impossible de mettre à jour depuis redmine', notifyOptions.permanent);
     })
     .always(function() {
       setTimeout(updateAssignedRedmines, 1000 * configuration.refresh);
