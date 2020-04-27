@@ -107,7 +107,7 @@ class Exchange extends AbstractConnector implements ConnectorInterface
     $workingAccount = false;
     foreach($listOfEmails as $userEmail)
     {
-      $cmd = sprintf('../src/poc-py-exchange/test.py --start=%s --stop=%s --login=%s --mail=%s --server=%s',
+      $cmd = sprintf('../src/py-exchange/calendar-exchange.py --start=%s --stop=%s --login=%s --mail=%s --server=%s',
         \escapeshellarg($strStart),
         \escapeshellarg($strEnd),
         \escapeshellarg($exchangeUser),
