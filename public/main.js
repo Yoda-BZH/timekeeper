@@ -310,7 +310,8 @@
         appendTo: "#createNew",
         source: '/api/redmine/autocomplete',
         minLength: 0,
-        select: function(event, ui) {
+        select: function(event, ui)
+        {
           redmineObj.val("");
           //console.log('setting');
           redmineObj.val(ui.item.rid);
@@ -326,7 +327,8 @@
           $("#timeentryAdd").removeAttr('disabled');
           return false;
         },
-        focus: function(event, ui) {
+        focus: function(event, ui)
+        {
           if(!ui.item.rid)
           {
             return false;
@@ -335,14 +337,16 @@
           redmineText.text(ui.item.label);
           //realRedmine.val(ui.item.rid);
         },
-        close(event, ui) {
+        close: function(event, ui)
+        {
           if(redmineObj.val() != '')
           {
             return;
           }
           redmineText.html("");
         },
-        open: function () {
+        open: function()
+        {
             $('.ui-autocomplete.ui-front').css('z-index', elemDialog.css('z-index') + 1);
         },
         response: function(event, ui)
