@@ -242,7 +242,7 @@
         redmineText.html("");
         pendingEvent && pendingEvent.remove();
         timeouts.redmine && clearTimeout(timeouts.redmine);
-        timeouts.redmine = setTimeout(plugins.redmine.updateCallback, 1000 * configuration.refresh);
+        timeouts.redmine = setTimeout(function() { $('.fc-update_redmine-button').click(); }, 1000 * configuration.refresh);
         redmineUpdateButton.removeClass('pulsating-button');
       });
 
@@ -841,7 +841,7 @@
           calendar.addEvent(v);
           //console.log('adding to calendar');
         });
-        timeouts[tksource] = setTimeout(plugins[tksource].updateCallback, 1000 * configuration.refresh);
+        timeouts[tksource] = setTimeout(function() { $('.fc-update_' + tksource + '-button').click(); }, 1000 * configuration.refresh);
       }})
       .fail(function() {
         //alert('Impossible de mettre à jour depuis ' + this.tksource);
@@ -896,7 +896,7 @@
       $.notify('Impossible de mettre a jour le nombre d\'issue redmine', notifyOptions.permanent);
     })
     .always(function() {
-      timeouts.assigne = setTimeout(plugins.redmine.updateCallback, 1000 * configuration.refresh);
+      timeouts.assigne = setTimeout(function() { $('.fc-update_redmine-button').click(); }, 1000 * configuration.refresh);
     })
     ;
   };
