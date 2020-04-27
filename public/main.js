@@ -80,11 +80,19 @@
       var obj3 = {};
       for (var attrname in obj1)
       {
-        obj1[attrname] != null && obj3[attrname] = obj1[attrname];
+        if(obj1[attrname] == null)
+        {
+          continue;
+        }
+        obj3[attrname] = obj1[attrname];
       }
-      for (var attrname in obj2) 
-      { 
-        obj2[attrname] != null && obj3[attrname] = obj2[attrname]; 
+      for (var attrname in obj2)
+      {
+        if(obj2[attrname] == null)
+        {
+          continue;
+        }
+        obj3[attrname] = obj2[attrname];
       }
       return obj3;
   }
