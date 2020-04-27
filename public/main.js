@@ -76,7 +76,12 @@
     localStorage.setItem("showMaskedEvents",     sessionStorage.getItem("showMaskedEvents"      ));
     sessionStorage.clear();
   }
-
+  function merge_options(obj1,obj2){
+      var obj3 = {};
+      for (var attrname in obj1) { obj3[attrname] = obj1[attrname]; }
+      for (var attrname in obj2) { obj3[attrname] = obj2[attrname]; }
+      return obj3;
+  }
   function initialize(options, userPlugins)
   {
     plugins = userPlugins;
@@ -147,6 +152,8 @@
       //visibility_exchange:  localStorage.getItem('visibility_exchange'),
       //visibility_gitlab:    localStorage.getItem('visibility_gitlab'),
     };
+    Object.keys(requestedConf).forEach(function(key) { (requestedConf[key] === null) && delete requestedConf[key]; });
+
     for(key in plugins)
     {
       if ('redmine' == key)
@@ -159,9 +166,8 @@
       requestedConf['visibility_' + key] = localStorage.getItem("visibility_" + key);
     }
 
-    Object.keys(requestedConf).forEach(function(key) { (requestedConf[key] === null) && delete requestedConf[key]; });
-
-    configuration = {...defaultConfiguration, ...requestedConf};
+    //configuration = {...defaultConfiguration, ...requestedConf};
+    configuration = merge_options(defaultConfiguration, requestedConf);
 
     // theme list: https://www.bootstrapcdn.com/bootswatch/
     allowedThemes = {
@@ -273,7 +279,7 @@
           $.notify('Impossible de créer l\'entrées', notifyOptions.permanent);
         })
         .always(function() {
-          plugins.redmine.updateCallback()
+          $('.fc-update_' + tksource + '-button').click();
         })
         ;
 
@@ -444,7 +450,11 @@
 
     //console.log('header.right', header.right);
 
-    var customButtons = { ...customButtonsUpdate, ...customButtonsToggle, ...actionsUserCustomButtons, ...otherUserCustomButtons, ...customButtonBurger};
+    //var customButtons = { ...customButtonsUpdate, ...customButtonsToggle, ...actionsUserCustomButtons, ...otherUserCustomButtons, ...customButtonBurger};
+    var customButtons = merge_options(customButtonsUpdate, customButtonsToggle);
+    customButtons = merge_options(customButtons, actionsUserCustomButtons);
+    customButtons = merge_options(customButtons, otherUserCustomButtons);
+    customButtons = merge_options(customButtons, customButtonBurger);
     //console.log(customButtons);
 
     calendarOptions = {
@@ -967,6 +977,11 @@
       if(event.allDay)
       {
         event.remove();
+        continue;
+      }
+      if(undefined == event.extendedProps.type)
+      {
+        //console.log('remove ?', event.extendedProps.type, event);
         continue;
       }
       // fixme ?
