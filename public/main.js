@@ -142,19 +142,11 @@
       showTooltips: true,
       showMaskedEvents: false,
       theme: "default",
-      //visibility_otrs: 'visible',
-      //visibility_redmine: 'visible',
-      //visibility_exchange: 'visible',
-      //visibility_gitlab: 'visible',
       visibility___main: 'visible',
       color___main: "#62A7B0",
     }
 
     requestedConf = {
-      //colorOtrs:            localStorage.getItem("colorOtrs"),
-      //colorRedmine:         localStorage.getItem("colorRedmine"),
-      //colorExchange:        localStorage.getItem("colorExchange"),
-      //colorGitlab:          localStorage.getItem("colorGitlab"),
       color___main:         localStorage.getItem("color___main"),
       showWeekend:          localStorage.getItem("showWeekend") === "false" ? false : true,
       businessHourStart:    localStorage.getItem("businessHourStart"),
@@ -164,10 +156,6 @@
       showTooltips:         localStorage.getItem('showTooltips') === 'false' ? false : true,
       showMaskedEvents:     localStorage.getItem('showMaskedEvents') === 'true' ? true : false,
       theme:                localStorage.getItem('theme'),
-      //visibility_otrs:      localStorage.getItem('visibility_otrs'),
-      //visibility_redmine:   localStorage.getItem('visibility_redmine'),
-      //visibility_exchange:  localStorage.getItem('visibility_exchange'),
-      //visibility_gitlab:    localStorage.getItem('visibility_gitlab'),
     };
     Object.keys(requestedConf).forEach(function(key) { (requestedConf[key] === null) && delete requestedConf[key]; });
 
