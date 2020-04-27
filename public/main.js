@@ -809,8 +809,16 @@
     })
   }
 
-  function displayDate(info, sourceToUpdate = 'all', force = false)
+  function displayDate(info, sourceToUpdate, force)
   {
+    if(undefined === sourceToUpdate)
+    {
+      sourceToUpdate = 'all';
+    }
+    if(undefined === force)
+    {
+      force = false;
+    }
     //console.log('callign displayDate for', sourceToUpdate);
     var activeDateIso = info.view.activeStart.toISOString();
     //console.log('checking date', activeDateIso, loadedDates[activeDateIso]);
