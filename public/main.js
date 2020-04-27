@@ -77,7 +77,8 @@
     sessionStorage.clear();
   }
 
-  function merge_options(obj1,obj2){
+  function merge_options(obj1,obj2)
+  {
       var obj3 = {};
       for (var attrname in obj1)
       {
@@ -616,11 +617,33 @@
         setCustomTheme();
       }
 
+      for(var key in plugins)
+      {
+        if(configuration['visibility_' + key] != 'visible')
+        {
+          continue;
+        }
+        //$('.fc-update_' + key + '-button').click();
+      }
+
       // force setup of tooltip if needed;
       setupTooltips(configuration.showTooltips);
+      /**
+       * apparently changin an option in the calendar redrays the toggle buttons
+       * and they loose the line-through style if they had id
+       * forcing a re draw ...
+       */
+      setTimeout(function()
+      {
+        for(var key in plugins)
+        {
+          updateButtonStatus(key, '.fc-toggle_' + key + '-button');
+        }
+      }, calendar.getOption("rerenderDelay") * 10);
 
       configurationMenu.dialog('close');
     });
+
     setThemeInConfiguration();
     setCustomTheme();
 
@@ -652,6 +675,25 @@
       var sourceType = this.className.match(/fc-toggle_([^ ]+)-button/)[1];
       updateButtonStatus(sourceType, this);
       //console.log(this);
+    });
+
+    $("#mainMenu input[type=color]").change(function(el)
+    {
+      //console.log(el, this);
+      var sourceType = this.id.match(/idColor_(.*)/)[1];
+      var newColor = $(this).val();
+      //console.log('changing color for', sourceType);
+      var events = calendar.getEvents();
+      for(var eventId in events)
+      {
+        var event = events[eventId];
+        if(event.extendedProps.type != sourceType)
+        {
+          continue;
+        }
+        //console.log('changing color for', eventId, 'from', event.color, 'to', newColor);
+        event.setProp('color', newColor);
+      }
     });
   }
 
@@ -836,6 +878,7 @@
       force = false;
     }
     //console.log('callign displayDate for', sourceToUpdate);
+
     var activeDateIso = info.view.activeStart.toISOString();
     //console.log('checking date', activeDateIso, loadedDates[activeDateIso]);
     var currentState = {
