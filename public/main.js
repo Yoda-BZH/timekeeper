@@ -640,6 +640,7 @@
 
       // force setup of tooltip if needed;
       setupTooltips(configuration.showTooltips);
+
       /**
        * apparently changin an option in the calendar redrays the toggle buttons
        * and they loose the line-through style if they had id
@@ -662,7 +663,7 @@
     $("#loading-timekeeper").remove();
   }
 
-  function run()
+  function run() // you clever boy
   {
     calendar.render();
   }
