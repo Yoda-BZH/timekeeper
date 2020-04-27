@@ -912,10 +912,12 @@
       var clickedButton = $($('.fc-update_' + source + '-button')[0]);
       clickedButton.attr('disabled', 'disabled');
       var url = '/api/update?type=' + source + dates;
-      $.ajax({url: url, dataType: 'json', tksource: source, success: function(data) {
+      $.ajax({url: url, dataType: 'json', tksource: source, success: function(data)
+      {
         //console.log('received infos for ' + this.tksource);
         var tksource = this.tksource;
-        $.each(data, function(k, v) {
+        $.each(data, function(k, v)
+        {
           v.durationEditable = v.resourceEditable = v.editable = !!plugins[tksource].resize;
           v.color = configuration['color_' + tksource]; // fixme
           //console.log('setting color for ' + tksource + ' to ' + v.color);
@@ -924,11 +926,13 @@
         });
         timeouts[tksource] = setTimeout(function() { $('.fc-update_' + tksource + '-button').click(); }, 1000 * configuration.refresh);
       }})
-      .fail(function() {
+      .fail(function()
+      {
         //alert('Impossible de mettre à jour depuis ' + this.tksource);
         $.notify('Impossible de mettre à jour depuis la source "' + this.tksource + '"', notifyOptions.permanent);
       })
-      .always(function() {
+      .always(function()
+      {
         $($('.fc-update_' + this.tksource + '-button')[0]).removeAttr('disabled');
         computeAccountedEntries();
       })
