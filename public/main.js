@@ -154,7 +154,7 @@
         hasRedmine = true;
       }
       defaultConfiguration['color_' + key] = plugins[key].color;
-      defaultConfiguration['visibility_' + key] = plugins[key].color;
+      defaultConfiguration['visibility_' + key] = 'visible';
       requestedConf['color_' + key] = localStorage.getItem("color_" + key);
       requestedConf['visibility_' + key] = localStorage.getItem("visibility_" + key);
     }
@@ -242,7 +242,7 @@
         redmineText.html("");
         pendingEvent && pendingEvent.remove();
         timeouts.redmine && clearTimeout(timeouts.redmine);
-        timeouts.redmine = setTimeout(updateRedmine, 1000 * configuration.refresh);
+        timeouts.redmine = setTimeout(plugins.redmine.updateCallback, 1000 * configuration.refresh);
         redmineUpdateButton.removeClass('pulsating-button');
       });
 
@@ -261,17 +261,19 @@
         }
 
         pendingEvent.setProp('title', redmineId);
-        pendingEvent.setProp('color', '#EA7D73');
+        pendingEvent.setProp('color', configuration['color_redmine']);
         $.post('/api/redmine/add', postData, function(data, status, xhr) {
           var newEntry = data;
+          newEntry.color = configuration['color_redmine'];
           calendar.addEvent(newEntry);
+          $.notify('Nouvelle entrée Redmine créee.', notifyOptions.temporary);
         })
         .fail(function() {
           //alert('Impossible de créer l\'entrées');
           $.notify('Impossible de créer l\'entrées', notifyOptions.permanent);
         })
         .always(function() {
-          updateRedmine()
+          plugins.redmine.updateCallback()
         })
         ;
 
@@ -894,7 +896,7 @@
       $.notify('Impossible de mettre a jour le nombre d\'issue redmine', notifyOptions.permanent);
     })
     .always(function() {
-      timeouts.assigne = setTimeout(updateMyRedmines, 1000 * configuration.refresh);
+      timeouts.assigne = setTimeout(plugins.redmine.updateCallback, 1000 * configuration.refresh);
     })
     ;
   };
@@ -967,6 +969,11 @@
         event.remove();
         continue;
       }
+      // fixme ?
+      // TypeError: plugins[event.extendedProps.type] is undefinedmain.js:972:10
+      //     computeAccountedEntries http://localhost/main.js:972
+      //     displayDate http://localhost/main.js:852
+      //     jQuery 4
       if(!plugins[event.extendedProps.type].accountable)
       {
         continue;
