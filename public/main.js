@@ -256,7 +256,8 @@
 
     if(hasRedmine)
     {
-      elemDialog.on('dialogclose', function(event, ui) {
+      elemDialog.on('dialogclose', function(event, ui)
+      {
         //console.log(event, ui);
         elemDialog.find("#datetime").text("");
         //redmineId = redmineObj.val();
@@ -269,7 +270,8 @@
         redmineUpdateButton.removeClass('pulsating-button');
       });
 
-      btnSubmit.bind('click', function(event) {
+      btnSubmit.bind('click', function(event)
+      {
         event.preventDefault();
         var redmineId = redmineObj.val();
         //console.log("adding time for redmine " + redmineId);
@@ -285,17 +287,20 @@
 
         pendingEvent.setProp('title', redmineId);
         pendingEvent.setProp('color', configuration['color_redmine']);
-        $.post('/api/redmine/add', postData, function(data, status, xhr) {
+        $.post('/api/redmine/add', postData, function(data, status, xhr)
+        {
           var newEntry = data;
           newEntry.color = configuration['color_redmine'];
           calendar.addEvent(newEntry);
           $.notify('Nouvelle entrée Redmine créee.', notifyOptions.temporary);
         })
-        .fail(function() {
+        .fail(function()
+        {
           //alert('Impossible de créer l\'entrées');
           $.notify('Impossible de créer l\'entrées', notifyOptions.permanent);
         })
-        .always(function() {
+        .always(function()
+        {
           $('.fc-update_' + tksource + '-button').click();
         })
         ;
@@ -304,21 +309,24 @@
         redmineObjCleanup();
       });
 
-      btnHideExchangeEvent.bind('click', function(event) {
+      btnHideExchangeEvent.bind('click', function(event)
+      {
         event.preventDefault();
         var postData = {
           start: pendingEvent.start,
           uid: pendingEvent.extendedProps.uid,
         };
         //console.log(postData);
-        $.post('/api/exchange/event-hide', postData, function(data, status, xhr) {
+        $.post('/api/exchange/event-hide', postData, function(data, status, xhr)
+        {
           pendingEvent.extendedProps.original.remove();
           elemDialog.dialog('close');
         });
       });
 
       btnCancel = $(elemDialog.find("#timeentryCancel")[0]);
-      btnCancel.bind('click', function(event) {
+      btnCancel.bind('click', function(event)
+      {
         event.preventDefault();
         redmineObjCleanup();
       });
@@ -393,7 +401,8 @@
       var plugin = plugins[key];
       var updateKey = 'update_' + key;
       var toggleKey = 'toggle_' + key;
-      plugins[key].updateCallback = function(el) {
+      plugins[key].updateCallback = function(el)
+      {
         if(!el)
         {
           //console.log("update callback called without clicked element !");
@@ -410,7 +419,8 @@
         timeouts[k] && clearTimeout(timeouts[k]);
         displayDate(calendar, k, true);
       };
-      plugins[key].toggleCallback = function(el) {
+      plugins[key].toggleCallback = function(el)
+      {
         var k = el.target.className.match(/fc-toggle_([^ ]+)-button/);
         if(2 != k.length)
         {
@@ -524,7 +534,8 @@
       nowIndicator: true,
       weekends: configuration.showWeekend,
       //events: events,
-      eventClick: function(info) {
+      eventClick: function(info)
+      {
         //console.log(info.event);
         if(plugins[info.event.extendedProps.type].convertible)
         {
@@ -541,7 +552,8 @@
       rerenderDelay: 100,
       customButtons: customButtons,
       header: header,
-      eventRender: function(info) {
+      eventRender: function(info)
+      {
         var targetStatus = configuration['visibility_' + info.event.extendedProps.type];
         //console.log('status must be ', targetStatus, '#visility-' + info.event.extendedProps.type);
         return targetStatus == 'visible';
@@ -670,7 +682,8 @@
     /**
      * on load, set button toggle to the user configuration state
      */
-    $('button[class^=fc-toggle]').each(function(index) {
+    $('button[class^=fc-toggle]').each(function(index)
+    {
       //var className = this.className.split(' ')[0];
       var sourceType = this.className.match(/fc-toggle_([^ ]+)-button/)[1];
       updateButtonStatus(sourceType, this);
@@ -859,7 +872,8 @@
 
   function cleanupOldEvents(info, source)
   {
-    $.each(calendar.getEvents(), function(k, v) {
+    $.each(calendar.getEvents(), function(k, v)
+    {
       if(v.extendedProps.type == source)
       {
         v.remove();
@@ -973,14 +987,17 @@
       return;
     }
     timeouts.assigne && clearTimeout(timeouts.assigne);
-    $.getJSON('/api/redmine/assign', function(i) {
+    $.getJSON('/api/redmine/assign', function(i)
+    {
       redmineUpdateButton.text(redmineUpdateButton.data('default-text') + ' (' + i.count + ')');
     })
-    .fail(function() {
+    .fail(function()
+    {
       //alert('Impossible de mettre a jour le nombre d\'issue redmine');
       $.notify('Impossible de mettre a jour le nombre d\'issue redmine', notifyOptions.permanent);
     })
-    .always(function() {
+    .always(function()
+    {
       timeouts.assigne = setTimeout(function() { $('.fc-update_redmine-button').click(); }, 1000 * configuration.refresh);
     })
     ;
@@ -1001,10 +1018,12 @@
       teid: info.event.extendedProps.teid,
       comment: info.event.extendedProps.comment,
     };
-    $.post('/api/' + info.event.extendedProps.type + '/timeentry-update', postData, function(data, status, xhr) {
+    $.post('/api/' + info.event.extendedProps.type + '/timeentry-update', postData, function(data, status, xhr)
+    {
       // todo
     })
-    .fail(function() {
+    .fail(function()
+    {
       //alert('Impossible de mettre a jour l\'entrée');
       $.notify('Impossible de mettre a jour l\'entrée "' + info.event.extendedProps.type + '"', notifyOptions.permanent);
     })
@@ -1020,7 +1039,8 @@
 
   function updateAssignedRedmines()
   {
-    $.getJSON('/api/redmine/assigned', function(issues) {
+    $.getJSON('/api/redmine/assigned', function(issues)
+    {
       if(0 == issues.count)
       {
         updateMyRedmines();
@@ -1029,11 +1049,13 @@
       redmineUpdateButton.text(redmineUpdateButton.data('default-text') + ' (' + issues.count + ')');
       //console && console.log('loaded ', issues.count, 'issues for this user');
     })
-    .fail(function() {
+    .fail(function()
+    {
       //alert('Impossible de mettre à jour depuis redmine');
       $.notify('Impossible de mettre à jour depuis redmine', notifyOptions.permanent);
     })
-    .always(function() {
+    .always(function()
+    {
       setTimeout(updateAssignedRedmines, 1000 * configuration.refresh);
     });
     ;
