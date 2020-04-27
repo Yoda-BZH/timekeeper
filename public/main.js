@@ -916,7 +916,7 @@
         //console.log('received infos for ' + this.tksource);
         var tksource = this.tksource;
         $.each(data, function(k, v) {
-          v.durationEditable = v.resourceEditable = v.editable = (v.rid != '');
+          v.durationEditable = v.resourceEditable = v.editable = !!plugins[tksource].resize;
           v.color = configuration['color_' + tksource]; // fixme
           //console.log('setting color for ' + tksource + ' to ' + v.color);
           calendar.addEvent(v);
