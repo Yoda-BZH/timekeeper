@@ -1,10 +1,6 @@
-# coding=utf-8
 import base64
 from collections import OrderedDict
 import logging
-
-from future.utils import python_2_unicode_compatible
-from six import string_types
 
 from .properties import InvalidField
 from .util import create_element, xml_to_str, value_to_xml_text, is_iterable
@@ -13,8 +9,9 @@ from .version import EXCHANGE_2010
 log = logging.getLogger(__name__)
 
 
-@python_2_unicode_compatible
-class Q(object):
+class Q:
+    """A class with an API similar to Django Q objects. Used to implemnt advanced filtering logic."""
+
     # Connection types
     AND = 'AND'
     OR = 'OR'
@@ -75,7 +72,7 @@ class Q(object):
 
         # Check for query string, or Q object containing query string, as the only argument
         if len(args) == 1 and not kwargs:
-            if isinstance(args[0], string_types):
+            if isinstance(args[0], str):
                 self.query_string = args[0]
                 return
             if isinstance(args[0], self.__class__) and args[0].query_string:
@@ -85,7 +82,7 @@ class Q(object):
         # Parse args which must be Q objects
         for q in args:
             if not isinstance(q, self.__class__):
-                raise ValueError("Non-keyword arg %r must be a Q object" % q)
+                raise ValueError("Non-keyword arg %r must be a Q instance" % q)
             if q.query_string:
                 raise ValueError(
                     'A query string cannot be combined with other restrictions (args: %r, kwargs: %r)' % (args, kwargs)
@@ -183,11 +180,11 @@ class Q(object):
         self.query_string = q.query_string
         self.children = q.children
 
-    def clean(self):
-        # Do some basic checks on the attributes, using a generic folder and no Exchange version restrictions. to_xml()
-        # does a really good job of validating. There's no reason to replicate much of that here.
+    def clean(self, version):
+        # Do some basic checks on the attributes, using a generic folder. to_xml() does a really good job of
+        # validating. There's no reason to replicate much of that here.
         from .folders import Folder
-        self.to_xml(folders=[Folder()], version=None, applies_to=Restriction.ITEMS)
+        self.to_xml(folders=[Folder()], version=version, applies_to=Restriction.ITEMS)
 
     @classmethod
     def _lookup_to_op(cls, lookup):
@@ -233,7 +230,7 @@ class Q(object):
             raise ValueError("'op' %s must be one of %s" % (op, valid_ops))
 
         # For description of Contains attribute values, see
-        #     https://msdn.microsoft.com/en-us/library/office/aa580702(v=exchg.150).aspx
+        #     https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/contains
         #
         # Possible ContainmentMode values:
         #     FullString, Prefixed, Substring, PrefixOnWords, ExactPhrase
@@ -345,7 +342,7 @@ class Q(object):
             # This is a restriction on Folder fields
             folder.validate_field(field=field_path.field, version=version)
         else:
-            folder.validate_item_field(field=field_path.field)
+            folder.validate_item_field(field=field_path.field, version=version)
         if not field_path.field.is_searchable:
             raise ValueError("EWS does not support filtering on field '%s'" % field_path.field.name)
         if field_path.subfield and not field_path.subfield.is_searchable:
@@ -489,8 +486,7 @@ class Q(object):
         return self.__class__.__name__ + repr(sorted_children)
 
 
-@python_2_unicode_compatible
-class Restriction(object):
+class Restriction:
     """
     Implements an EWS Restriction type.
 
@@ -506,9 +502,9 @@ class Restriction(object):
             raise ValueError("'q' value %r must be a Q instance" % q)
         if q.is_empty():
             raise ValueError("Q object must not be empty")
-        from .folders import Folder
+        from .folders import BaseFolder
         for folder in folders:
-            if not isinstance(folder, Folder):
+            if not isinstance(folder, BaseFolder):
                 raise ValueError("'folder' value %r must be a Folder instance" % folder)
         if applies_to not in self.RESTRICTION_TYPES:
             raise ValueError("'applies_to' must be one of %s" % (self.RESTRICTION_TYPES,))
@@ -523,4 +519,4 @@ class Restriction(object):
         """
         Prints the XML syntax tree
         """
-        return xml_to_str(self.to_xml(version=None))
+        return xml_to_str(self.to_xml(version=self.folders[0].account.version))

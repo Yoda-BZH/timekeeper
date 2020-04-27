@@ -5,7 +5,7 @@ from .common import EWSAccountService
 class SetUserOofSettings(EWSAccountService):
     """
     Set automatic replies for the specified mailbox.
-    MSDN: https://msdn.microsoft.com/en-us/library/aa580294(v=exchg.140).aspx
+    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/setuseroofsettings-operation
     """
     SERVICE_NAME = 'SetUserOofSettings'
 
@@ -24,6 +24,6 @@ class SetUserOofSettings(EWSAccountService):
 
     def _get_element_container(self, message, response_message=None, name=None):
         response_message = message.find('{%s}ResponseMessage' % MNS)
-        return super(SetUserOofSettings, self)._get_element_container(
+        return super()._get_element_container(
             message=message, response_message=response_message, name=name
         )

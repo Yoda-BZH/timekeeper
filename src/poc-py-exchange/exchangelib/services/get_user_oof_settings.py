@@ -5,7 +5,7 @@ from .common import EWSAccountService
 class GetUserOofSettings(EWSAccountService):
     """
     Get automatic reply settings for the specified mailbox.
-    MSDN: https://msdn.microsoft.com/en-us/library/aa563465(v=exchg.140).aspx
+    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/getuseroofsettings-operation
     """
     SERVICE_NAME = 'GetUserOofSettings'
     element_container_name = '{%s}OofSettings' % TNS
@@ -33,6 +33,6 @@ class GetUserOofSettings(EWSAccountService):
 
     def _get_element_container(self, message, response_message=None, name=None):
         response_message = message.find('{%s}ResponseMessage' % MNS)
-        return super(GetUserOofSettings, self)._get_element_container(
+        return super()._get_element_container(
             message=message, response_message=response_message, name=name
         )

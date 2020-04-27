@@ -1,6 +1,3 @@
-# coding=utf-8
-from __future__ import unicode_literals
-
 import abc
 from itertools import chain
 import logging
@@ -13,7 +10,7 @@ from ..errors import EWSWarning, TransportError, SOAPError, ErrorTimeoutExpired,
     ErrorInternalServerTransientError, ErrorNoRespondingCASInDestinationSite, ErrorImpersonationFailed, \
     ErrorMailboxMoveInProgress, ErrorAccessDenied, ErrorConnectionFailed, RateLimitError, ErrorServerBusy, \
     ErrorTooManyObjectsOpened, ErrorInvalidLicense, ErrorInvalidSchemaVersionForMailboxVersion, \
-    ErrorInvalidServerVersion, ErrorItemNotFound, ErrorADUnavailable, ResponseMessageError, ErrorInvalidChangeKey, \
+    ErrorInvalidServerVersion, ErrorItemNotFound, ErrorADUnavailable, ErrorInvalidChangeKey, \
     ErrorItemSave, ErrorInvalidIdMalformed, ErrorMessageSizeExceeded, UnauthorizedError, \
     ErrorCannotDeleteTaskOccurrence, ErrorMimeContentConversionFailed, ErrorRecurrenceHasNoOccurrence, \
     ErrorNoPublicFolderReplicaAvailable, MalformedResponseError, ErrorExceededConnectionCount, \
@@ -27,9 +24,7 @@ log = logging.getLogger(__name__)
 CHUNK_SIZE = 100  # A default chunk size for all services
 
 
-class EWSService(object):
-    __metaclass__ = abc.ABCMeta
-
+class EWSService(metaclass=abc.ABCMeta):
     SERVICE_NAME = None  # The name of the SOAP service
     element_container_name = None  # The name of the XML element wrapping the collection of returned items
     # Return exception instance instead of raising exceptions for the following errors when contained in an element
@@ -118,11 +113,12 @@ class EWSService(object):
         from ..version import API_VERSIONS
         if isinstance(self, EWSAccountService):
             account = self.account
-            hint = self.account.version
+            version_hint = self.account.version
         else:
             account = None
-            hint = self.protocol.version
-        api_versions = [hint.api_version] + [v for v in API_VERSIONS if v != hint.api_version]
+            # We may be here due to version guessing in Protocol.version, so we can't use the Protocol.version property
+            version_hint = self.protocol.config.version
+        api_versions = [version_hint.api_version] + [v for v in API_VERSIONS if v != version_hint.api_version]
         for api_version in api_versions:
             log.debug('Trying API version %s for account %s', api_version, account)
             r, session = post_ratelimited(
@@ -130,7 +126,7 @@ class EWSService(object):
                 session=self.protocol.get_session(),
                 url=self.protocol.service_endpoint,
                 headers=extra_headers(account=account),
-                data=wrap(content=payload, version=api_version, account=account),
+                data=wrap(content=payload, api_version=api_version, account=account),
                 allow_redirects=False,
                 stream=self.streaming,
             )
@@ -141,9 +137,18 @@ class EWSService(object):
                 # If we're streaming, we want to wait to release the session until we have consumed the stream.
                 self.protocol.release_session(session)
             try:
-                res = self._get_soap_payload(response=r, **parse_opts)
+                header, body = self._get_soap_parts(response=r, **parse_opts)
             except ParseError as e:
                 raise SOAPError('Bad SOAP response: %s' % e)
+            # The body may contain error messages from Exchange, but we still want to collect version info
+            if header is not None:
+                try:
+                    self._update_api_version(version_hint=version_hint, api_version=api_version, header=header,
+                                             **parse_opts)
+                except TransportError as te:
+                    log.debug('Failed to update version info (%s)', te)
+            try:
+                res = self._get_soap_messages(body=body, **parse_opts)
             except (ErrorInvalidServerVersion, ErrorIncorrectSchemaVersion, ErrorInvalidRequest):
                 # The guessed server version is wrong. Try the next version
                 log.debug('API version %s was invalid', api_version)
@@ -158,12 +163,16 @@ class EWSService(object):
             except ErrorExceededConnectionCount as e:
                 # ErrorExceededConnectionCount indicates that the connecting user has too many open TCP connections to
                 # the server. Decrease our session pool size.
-                try:
-                    self.protocol.decrease_poolsize()
-                    continue
-                except SessionPoolMinSizeReached:
-                    # We're already as low as we can go. Let the user handle this.
-                    raise e
+                if self.streaming:
+                    # In streaming mode, we haven't released the session yet, so we can't discard the session
+                    raise
+                else:
+                    try:
+                        self.protocol.decrease_poolsize()
+                        continue
+                    except SessionPoolMinSizeReached:
+                        # We're already as low as we can go. Let the user handle this.
+                        raise e
             except (ErrorTooManyObjectsOpened, ErrorTimeoutExpired) as e:
                 # ErrorTooManyObjectsOpened means there are too many connections to the Exchange database. This is very
                 # often a symptom of sending too many requests.
@@ -178,15 +187,6 @@ class EWSService(object):
 
                 # Re-raise as an ErrorServerBusy with a default delay of 5 minutes
                 raise ErrorServerBusy(msg='Reraised from %s(%s)' % (e.__class__.__name__, e), back_off=300)
-            except ResponseMessageError as rme:
-                # We got an error message from Exchange, but we still want to get any new version info from the response
-                try:
-                    self._update_api_version(hint=hint, api_version=api_version, response=r)
-                except TransportError as te:
-                    log.debug('Failed to update version info (%s)', te)
-                raise rme
-            else:
-                self._update_api_version(hint=hint, api_version=api_version, response=r)
             finally:
                 if self.streaming:
                     # TODO: We shouldn't release the session yet if we still haven't fully consumed the stream. It seems
@@ -205,27 +205,24 @@ class EWSService(object):
             self.protocol.decrease_poolsize()
         except SessionPoolMinSizeReached:
             pass
-        if self.protocol.credentials.fail_fast:
+        if self.protocol.retry_policy.fail_fast:
             raise e
-        self.protocol.credentials.back_off(e.back_off)
+        self.protocol.retry_policy.back_off(e.back_off)
         # We'll warn about this later if we actually need to sleep
 
-    def _update_api_version(self, hint, api_version, response):
-        if api_version == hint.api_version and hint.build is not None:
+    def _update_api_version(self, version_hint, api_version, header, **parse_opts):
+        from ..version import Version
+        head_version = Version.from_soap_header(requested_api_version=api_version, header=header)
+        if version_hint == head_version:
             # Nothing to do
             return
+        log.debug('Found new version (%s -> %s)', version_hint, head_version)
         # The api_version that worked was different than our hint, or we never got a build version. Set new
         # version for account.
-        from ..version import Version
-        if api_version != hint.api_version:
-            log.debug('Found new API version (%s -> %s)', hint.api_version, api_version)
-        else:
-            log.debug('Adding missing build number %s', api_version)
-        new_version = Version.from_response(requested_api_version=api_version, bytes_content=response.content)
         if isinstance(self, EWSAccountService):
-            self.account.version = new_version
+            self.account.version = head_version
         else:
-            self.protocol.version = new_version
+            self.protocol.config.version = head_version
 
     @classmethod
     def _response_tag(cls):
@@ -240,11 +237,19 @@ class EWSService(object):
         return '{%s}%sResponseMessage' % (MNS, cls.SERVICE_NAME)
 
     @classmethod
-    def _get_soap_payload(cls, response, **parse_opts):
+    def _get_soap_parts(cls, response, **parse_opts):
         root = to_xml(response.iter_content())
+        header = root.find('{%s}Header' % SOAPNS)
+        if header is None:
+            # This is normal when the response contains SOAP-level errors
+            log.debug('No header in XML response')
         body = root.find('{%s}Body' % SOAPNS)
         if body is None:
             raise MalformedResponseError('No Body element in SOAP response')
+        return header, body
+
+    @classmethod
+    def _get_soap_messages(cls, body, **parse_opts):
         response = body.find(cls._response_tag())
         if response is None:
             fault = body.find('{%s}Fault' % SOAPNS)
@@ -299,9 +304,11 @@ class EWSService(object):
     def _get_element_container(self, message, response_message=None, name=None):
         if response_message is None:
             response_message = message
-        # ResponseClass: See http://msdn.microsoft.com/en-us/library/aa566424(v=EXCHG.140).aspx
+        # ResponseClass: See
+        # https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/finditemresponsemessage
         response_class = response_message.get('ResponseClass')
-        # ResponseCode, MessageText: See http://msdn.microsoft.com/en-us/library/aa580757(v=EXCHG.140).aspx
+        # ResponseCode, MessageText: See
+        # https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/responsecode
         response_code = get_xml_attr(response_message, '{%s}ResponseCode' % MNS)
         msg_text = get_xml_attr(response_message, '{%s}MessageText' % MNS)
         msg_xml = response_message.find('{%s}MessageXml' % MNS)
@@ -385,7 +392,7 @@ class EWSAccountService(EWSService):
     def __init__(self, *args, **kwargs):
         self.account = kwargs.pop('account')
         kwargs['protocol'] = self.account.protocol
-        super(EWSAccountService, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
 
 class EWSFolderService(EWSAccountService):
@@ -394,7 +401,7 @@ class EWSFolderService(EWSAccountService):
         self.folders = kwargs.pop('folders')
         if not self.folders:
             raise ValueError('"folders" must not be empty')
-        super(EWSFolderService, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
 
 class PagingEWSMixIn(EWSService):
@@ -428,15 +435,22 @@ class PagingEWSMixIn(EWSService):
                 )
             for (rootfolder, next_offset), paging_info in zip(parsed_pages, paging_infos):
                 paging_info['next_offset'] = next_offset
+                if isinstance(rootfolder, Exception):
+                    yield rootfolder
+                    continue
                 if rootfolder is not None:
                     container = rootfolder.find(self.element_container_name)
                     if container is None:
                         raise MalformedResponseError('No %s elements in ResponseMessage (%s)' % (
                             self.element_container_name, xml_to_str(rootfolder)))
                     for elem in self._get_elements_in_container(container=container):
+                        if max_items and total_item_count >= max_items:
+                            # No need to continue. Break out of elements loop
+                            log.debug("'max_items' count reached (elements)")
+                            break
                         paging_info['item_count'] += 1
+                        total_item_count += 1
                         yield elem
-                    total_item_count += paging_info['item_count']
                     if max_items and total_item_count >= max_items:
                         # No need to continue. Break out of inner loop
                         log.debug("'max_items' count reached (inner)")
@@ -447,7 +461,10 @@ class PagingEWSMixIn(EWSService):
                 # Check sanity of paging offsets, but don't fail. When we are iterating huge collections that take a
                 # long time to complete, the collection may change while we are iterating. This can affect the
                 # 'next_offset' value and make it inconsistent with the number of already collected items.
-                if paging_info['next_offset'] != paging_info['item_count']:
+                # We may have a mismatch if we stopped early due to reaching 'max_items'.
+                if paging_info['next_offset'] != paging_info['item_count'] and (
+                    not max_items or total_item_count < max_items
+                ):
                     log.warning('Unexpected next offset: %s -> %s. Maybe the server-side collection has changed?'
                                 % (paging_info['item_count'], paging_info['next_offset']))
             # Also break out of outer loop
@@ -471,6 +488,8 @@ class PagingEWSMixIn(EWSService):
 
     def _get_page(self, message):
         rootfolder = self._get_element_container(message=message, name='{%s}RootFolder' % MNS)
+        if isinstance(rootfolder, Exception):
+            return rootfolder, None
         is_last_page = rootfolder.get('IncludesLastItemInRange').lower() in ('true', '0')
         offset = rootfolder.get('IndexedPagingOffset')
         if offset is None and not is_last_page:
@@ -493,33 +512,34 @@ class EWSPooledMixIn(EWSService):
         # list must be the same as the input id list, so the caller knows which status message belongs to which ID.
         # Yield results as they become available.
         results = []
-        n = 1
+        n = 0
         for chunk in chunkify(items, self.chunk_size):
-            log.debug('Starting %s._get_elements worker %s for %s items', self.__class__.__name__, n, len(chunk))
             n += 1
-            results.append(self.protocol.thread_pool.apply_async(
+            log.debug('Starting %s._get_elements worker %s for %s items', self.__class__.__name__, n, len(chunk))
+            results.append((n, self.protocol.thread_pool.apply_async(
                 lambda c: self._get_elements(payload=payload_func(c, **kwargs)),
                 (chunk,)
-            ))
+            )))
+
             # Results will be available before iteration has finished if 'items' is a slow generator. Return early
-            for i, r in enumerate(results, 1):
-                if r is None:
-                    continue
+            while True:
+                if not results:
+                    break
+                i, r = results[0]
                 if not r.ready():
                     # First non-yielded result isn't ready yet. Yielding other ready results would mess up ordering
                     break
                 log.debug('%s._get_elements result %s is ready early', self.__class__.__name__, i)
                 for elem in r.get():
                     yield elem
-                results[i-1] = None
+                # Results object has been processed. Remove from list.
+                del results[0]
+
         # Yield remaining results in order, as they become available
-        for i, r in enumerate(results, 1):
-            if r is None:
-                log.debug('%s._get_elements result %s of %s already sent', self.__class__.__name__, i, len(results))
-                continue
-            log.debug('Waiting for %s._get_elements result %s of %s', self.__class__.__name__, i, len(results))
+        for i, r in results:
+            log.debug('Waiting for %s._get_elements result %s of %s', self.__class__.__name__, i, n)
             elems = r.get()
-            log.debug('%s._get_elements result %s of %s is ready', self.__class__.__name__, i, len(results))
+            log.debug('%s._get_elements result %s of %s is ready', self.__class__.__name__, i, n)
             for elem in elems:
                 yield elem
 
@@ -548,11 +568,11 @@ def create_shape_element(tag, shape, additional_fields, version):
 
 
 def create_folder_ids_element(tag, folders, version):
-    from ..folders import Folder, FolderId, DistinguishedFolderId
+    from ..folders import BaseFolder, FolderId, DistinguishedFolderId
     folder_ids = create_element(tag)
     for folder in folders:
         log.debug('Collecting folder %s', folder)
-        if not isinstance(folder, (Folder, FolderId, DistinguishedFolderId)):
+        if not isinstance(folder, (BaseFolder, FolderId, DistinguishedFolderId)):
             folder = to_item_id(folder, FolderId)
         set_xml_value(folder_ids, folder, version=version)
     if not len(folder_ids):
@@ -583,7 +603,7 @@ def create_attachment_ids_element(items, version):
 
 
 def parse_folder_elem(elem, folder, account):
-    from ..folders import Folder, DistinguishedFolderId, RootOfHierarchy
+    from ..folders import BaseFolder, Folder, DistinguishedFolderId, RootOfHierarchy
     if isinstance(elem, Exception):
         return elem
     if isinstance(folder, RootOfHierarchy):
@@ -603,6 +623,6 @@ def parse_folder_elem(elem, folder, account):
         f = Folder.from_xml_with_root(elem=elem, root=account.root)
     if isinstance(folder, DistinguishedFolderId):
         f.is_distinguished = True
-    elif isinstance(folder, Folder) and folder.is_distinguished:
+    elif isinstance(folder, BaseFolder) and folder.is_distinguished:
         f.is_distinguished = True
     return f

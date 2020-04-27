@@ -1,8 +1,4 @@
-from __future__ import unicode_literals
-
 import logging
-
-from six import text_type
 
 from .fields import EmailSubField, LabelField, SubField, NamedSubField, Choice
 from .properties import EWSElement
@@ -11,12 +7,14 @@ log = logging.getLogger(__name__)
 
 
 class IndexedElement(EWSElement):
+    """Base class for all classes that implement an indexed element"""
     LABELS = set()
 
     __slots__ = tuple()
 
 
 class SingleFieldIndexedElement(IndexedElement):
+    """Base class for all classes that implement an indexed element with a single field"""
     __slots__ = tuple()
 
     @classmethod
@@ -28,7 +26,7 @@ class SingleFieldIndexedElement(IndexedElement):
 
 
 class EmailAddress(SingleFieldIndexedElement):
-    # MSDN:  https://msdn.microsoft.com/en-us/library/office/aa564757(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/entry-emailaddress"""
     ELEMENT_NAME = 'Entry'
     FIELDS = [
         LabelField('label', field_uri='Key', choices={
@@ -41,7 +39,7 @@ class EmailAddress(SingleFieldIndexedElement):
 
 
 class PhoneNumber(SingleFieldIndexedElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa565941(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/entry-phonenumber"""
     ELEMENT_NAME = 'Entry'
     FIELDS = [
         LabelField('label', field_uri='Key', choices={
@@ -57,11 +55,12 @@ class PhoneNumber(SingleFieldIndexedElement):
 
 
 class MultiFieldIndexedElement(IndexedElement):
+    """Base class for all classes that implement an indexed element with multiple fields"""
     __slots__ = tuple()
 
 
 class PhysicalAddress(MultiFieldIndexedElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa564323(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/entry-physicaladdress"""
     ELEMENT_NAME = 'Entry'
     FIELDS = [
         LabelField('label', field_uri='Key', choices={
@@ -79,5 +78,5 @@ class PhysicalAddress(MultiFieldIndexedElement):
     def clean(self, version=None):
         # pylint: disable=access-member-before-definition
         if isinstance(self.zipcode, int):
-            self.zipcode = text_type(self.zipcode)
-        super(PhysicalAddress, self).clean(version=version)
+            self.zipcode = str(self.zipcode)
+        super().clean(version=version)

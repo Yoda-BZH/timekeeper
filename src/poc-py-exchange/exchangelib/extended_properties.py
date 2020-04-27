@@ -1,37 +1,35 @@
-from __future__ import unicode_literals
-
 import base64
 import logging
 from decimal import Decimal
 
-from six import string_types
-
 from .ewsdatetime import EWSDateTime
 from .properties import EWSElement
 from .util import create_element, add_xml_child, get_xml_attrs, get_xml_attr, set_xml_value, value_to_xml_text, \
-    xml_text_to_value, is_iterable, TNS
+    xml_text_to_value, is_iterable, safe_b64decode, TNS
 
 log = logging.getLogger(__name__)
 
 
 class ExtendedProperty(EWSElement):
     """
-    MSDN: https://msdn.microsoft.com/en-us/library/office/aa566405(v=exchg.150).aspx
-
-    Property_* values: https://msdn.microsoft.com/en-us/library/office/aa564843(v=exchg.150).aspx
+    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/extendedproperty
     """
     ELEMENT_NAME = 'ExtendedProperty'
 
+    # Enum values: https://docs.microsoft.com/en-us/dotnet/api/exchangewebservices.distinguishedpropertysettype
     DISTINGUISHED_SETS = {
-        'Meeting',
-        'Appointment',
-        'Common',
-        'PublicStrings',
         'Address',
-        'InternetHeaders',
+        'Appointment',
         'CalendarAssistant',
+        'Common',
+        'InternetHeaders',
+        'Meeting',
+        'PublicStrings',
+        'Sharing',
+        'Task',
         'UnifiedMessaging',
     }
+    # Enum values: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/extendedfielduri
     PROPERTY_TYPES = {
         'ApplicationTime',
         'Binary',
@@ -61,6 +59,30 @@ class ExtendedProperty(EWSElement):
         'StringArray',
     }  # The commented-out types cannot be used for setting or getting (see docs) and are thus not very useful here
 
+    # Translation table between common distinguished_property_set_id and property_set_id values. See
+    # https://docs.microsoft.com/en-us/office/client-developer/outlook/mapi/commonly-used-property-sets
+    # ID values must be lowercase.
+    DISTINGUISHED_SET_NAME_TO_ID_MAP = {
+        'Address': '00062004-0000-0000-c000-000000000046',
+        'AirSync': '71035549-0739-4dcb-9163-00f0580dbbdf',
+        'Appointment': '00062002-0000-0000-c000-000000000046',
+        'Common': '00062008-0000-0000-c000-000000000046',
+        'InternetHeaders': '00020386-0000-0000-c000-000000000046',
+        'Log': '0006200a-0000-0000-c000-000000000046',
+        'Mapi': '00020328-0000-0000-c000-000000000046',
+        'Meeting': '6ed8da90-450b-101b-98da-00aa003f1305',
+        'Messaging': '41f28f13-83f4-4114-a584-eedb5a6b0bff',
+        'Note': '0006200e-0000-0000-c000-000000000046',
+        'PostRss': '00062041-0000-0000-c000-000000000046',
+        'PublicStrings': '00020329-0000-0000-c000-000000000046',
+        'Remote': '00062014-0000-0000-c000-000000000046',
+        'Report': '00062013-0000-0000-c000-000000000046',
+        'Sharing': '00062040-0000-0000-c000-000000000046',
+        'Task': '00062003-0000-0000-c000-000000000046',
+        'UnifiedMessaging': '4442858e-a9e3-4e80-b900-317a210cc15b',
+    }
+    DISTINGUISHED_SET_ID_TO_NAME_MAP = {v: k for k, v in DISTINGUISHED_SET_NAME_TO_ID_MAP.items()}
+
     distinguished_property_set_id = None
     property_set_id = None
     property_tag = None  # hex integer (e.g. 0x8000) or string ('0x8000')
@@ -75,7 +97,7 @@ class ExtendedProperty(EWSElement):
             # Allow to set attributes without keyword
             kwargs = dict(zip(self._slots_keys(), args))
         self.value = kwargs.pop('value')
-        super(ExtendedProperty, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
     @classmethod
     def validate_cls(cls):
@@ -171,21 +193,47 @@ class ExtendedProperty(EWSElement):
                     "'%s' value %r must be an instance of %s" % (self.__class__.__name__, self.value, python_type))
 
     @classmethod
+    def is_property_instance(cls, elem):
+        # Returns whether an 'ExtendedProperty' element matches the definition for this class. Extended property fields
+        # do not have a name, so we must match on the cls.property_* attributes to match a field in the request with a
+        # field in the response.
+        extended_field_uri = elem.find('{%s}ExtendedFieldURI' % TNS)
+        cls_props = cls.properties_map()
+        elem_props = {k: extended_field_uri.get(k) for k in cls_props.keys()}
+        # Sometimes, EWS will helpfully translate a 'distinguished_property_set_id' value to a 'property_set_id' value
+        # and vice versa. Align these values.
+        cls_set_id = cls.DISTINGUISHED_SET_NAME_TO_ID_MAP.get(cls_props.get('DistinguishedPropertySetId'))
+        if cls_set_id:
+            cls_props['PropertySetId'] = cls_set_id
+        else:
+            cls_set_name = cls.DISTINGUISHED_SET_ID_TO_NAME_MAP.get(cls_props.get('PropertySetId', ''))
+            if cls_set_name:
+                cls_props['DistinguishedPropertySetId'] = cls_set_name
+        elem_set_id = cls.DISTINGUISHED_SET_NAME_TO_ID_MAP.get(elem_props.get('DistinguishedPropertySetId'))
+        if elem_set_id:
+            elem_props['PropertySetId'] = elem_set_id
+        else:
+            elem_set_name = cls.DISTINGUISHED_SET_ID_TO_NAME_MAP.get(elem_props.get('PropertySetId', ''))
+            if elem_set_name:
+                elem_props['DistinguishedPropertySetId'] = elem_set_name
+        return cls_props == elem_props
+
+    @classmethod
     def from_xml(cls, elem, account):
         # Gets value of this specific ExtendedProperty from a list of 'ExtendedProperty' XML elements
         python_type = cls.python_type()
         if cls.is_array_type():
             values = elem.find('{%s}Values' % TNS)
             if cls.is_binary_type():
-                return [base64.b64decode(val) for val in get_xml_attrs(values, '{%s}Value' % TNS)]
+                return [safe_b64decode(val) for val in get_xml_attrs(values, '{%s}Value' % TNS)]
             return [
                 xml_text_to_value(value=val, value_type=python_type)
                 for val in get_xml_attrs(values, '{%s}Value' % TNS)
             ]
         if cls.is_binary_type():
-            return base64.b64decode(get_xml_attr(elem, '{%s}Value' % TNS))
+            return safe_b64decode(get_xml_attr(elem, '{%s}Value' % TNS))
         extended_field_value = xml_text_to_value(value=get_xml_attr(elem, '{%s}Value' % TNS), value_type=python_type)
-        if python_type == string_types[0] and not extended_field_value:
+        if python_type == str and not extended_field_value:
             # For string types, we want to return the empty string instead of None if the element was
             # actually found, but there was no XML value. For other types, it would be more problematic
             # to make that distinction, e.g. return False for bool, 0 for int, etc.
@@ -215,7 +263,7 @@ class ExtendedProperty(EWSElement):
 
     @classmethod
     def property_tag_as_int(cls):
-        if isinstance(cls.property_tag, string_types):
+        if isinstance(cls.property_tag, str):
             return int(cls.property_tag, base=16)
         return cls.property_tag
 
@@ -231,7 +279,7 @@ class ExtendedProperty(EWSElement):
             'ApplicationTime': Decimal,
             'Binary': bytes,
             'Boolean': bool,
-            'CLSID': string_types[0],
+            'CLSID': str,
             'Currency': int,
             'Double': Decimal,
             'Float': Decimal,
@@ -239,7 +287,7 @@ class ExtendedProperty(EWSElement):
             'Long': int,
             'Short': int,
             'SystemTime': EWSDateTime,
-            'String': string_types[0],
+            'String': str,
         }[base_type]
 
     @classmethod
@@ -256,11 +304,9 @@ class ExtendedProperty(EWSElement):
 
 
 class ExternId(ExtendedProperty):
-    # This is a custom extended property defined by us. It's useful for synchronization purposes, to attach a unique ID
-    # from an external system. Strictly, this is an field that should probably not be registered by default since it's
-    # not part of EWS, but it's been around since the beginning of this library and would be a pain for consumers to
-    # register manually.
-
+    """This is a custom extended property defined by us. It's useful for synchronization purposes, to attach a unique ID
+    from an external system.
+    """
     property_set_id = 'c11ff724-aa03-4555-9952-8fa248a11c3e'  # This is arbitrary. We just want a unique UUID.
     property_name = 'External ID'
     property_type = 'String'

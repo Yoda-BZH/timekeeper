@@ -1,31 +1,29 @@
-# coding=utf-8
 """
 A protocol is an endpoint for EWS service connections. It contains all necessary information to make HTTPS connections.
 
 Protocols should be accessed through an Account, and are either created from a default Configuration or autodiscovered
 when creating an Account.
 """
-from __future__ import unicode_literals
-
+import datetime
 import logging
 from multiprocessing.pool import ThreadPool
 import os
 from threading import Lock
+from queue import LifoQueue, Empty, Full
 
 from cached_property import threaded_cached_property
 import requests.adapters
 import requests.sessions
-from future.utils import with_metaclass, python_2_unicode_compatible
-from future.moves.queue import LifoQueue, Empty, Full
-from six import string_types
+import requests.utils
+from oauthlib.oauth2 import BackendApplicationClient, WebApplicationClient
+from requests_oauthlib import OAuth2Session
 
-from .credentials import Credentials
+from .credentials import OAuth2AuthorizationCodeCredentials, OAuth2Credentials
 from .errors import TransportError, SessionPoolMinSizeReached
 from .properties import FreeBusyViewOptions, MailboxData, TimeWindow, TimeZone
 from .services import GetServerTimeZones, GetRoomLists, GetRooms, ResolveNames, GetUserAvailability, \
-    GetSearchableMailboxes, ExpandDL
-from .transport import get_auth_instance, get_service_authtype, get_docs_authtype, AUTH_TYPE_MAP, DEFAULT_HEADERS
-from .util import split_url
+    GetSearchableMailboxes, ExpandDL, ConvertId
+from .transport import get_auth_instance, get_service_authtype, NTLM, GSSAPI, SSPI, OAUTH2, DEFAULT_HEADERS
 from .version import Version, API_VERSIONS
 
 log = logging.getLogger(__name__)
@@ -35,8 +33,8 @@ def close_connections():
     CachingProtocol.clear_cache()
 
 
-class BaseProtocol(object):
-    # Base class for Protocol which implements the bare essentials
+class BaseProtocol:
+    """Base class for Protocol which implements the bare essentials"""
 
     # The maximum number of sessions (== TCP connections, see below) we will open to this service endpoint. Keep this
     # low unless you have an agreement with the Exchange admin on the receiving end to hammer the server and
@@ -53,25 +51,75 @@ class BaseProtocol(object):
     # The adapter class to use for HTTP requests. Override this if you need e.g. proxy support or specific TLS versions
     HTTP_ADAPTER_CLS = requests.adapters.HTTPAdapter
 
-    def __init__(self, service_endpoint, credentials, auth_type):
-        if not isinstance(credentials, Credentials):
-            raise ValueError("'credentials' %r must be a Credentials instance" % credentials)
-        if auth_type is not None:
-            if auth_type not in AUTH_TYPE_MAP:
-                raise ValueError("'auth_type' %s must be one if %s" % (auth_type, AUTH_TYPE_MAP.keys()))
-        self.has_ssl, self.server, _ = split_url(service_endpoint)
-        self.credentials = credentials
-        self.service_endpoint = service_endpoint
-        self.auth_type = auth_type
+    # The User-Agent header to use for HTTP requests. Override this to set an app-specific one
+    USERAGENT = None
+
+    def __init__(self, config):
+        from .configuration import Configuration
+        if not isinstance(config, Configuration):
+            raise ValueError("'config' %r must be a Configuration instance" % config)
+        if not config.service_endpoint:
+            raise AttributeError("'config.service_endpoint' must be set")
+        self.config = config
         self._session_pool_size = self.SESSION_POOLSIZE
-        self._session_pool = None  # Consumers need to fill the session pool themselves
-        self._session_pool_lock = None
+
+        # Autodetect authentication type if necessary
+        if self.config.auth_type is None:
+            self.config.auth_type = self.get_auth_type()
+
+        # Try to behave nicely with the remote server. We want to keep the connection open between requests.
+        # We also want to re-use sessions, to avoid the NTLM auth handshake on every request. We must know the
+        # authentication method to create a session pool.
+        self._session_pool = self._create_session_pool()
+        self._session_pool_lock = Lock()
+
+    @property
+    def service_endpoint(self):
+        return self.config.service_endpoint
+
+    @property
+    def auth_type(self):
+        return self.config.auth_type
+
+    @property
+    def credentials(self):
+        return self.config.credentials
+
+    @credentials.setter
+    def credentials(self, value):
+        # We are updating credentials, but that doesn't automatically propagate to the session objects. The simplest
+        # solution is to just kill the session pool and rebuild it.
+        with self._session_pool_lock:
+            self.config._credentials = value
+            self.close()
+            self._session_pool = self._create_session_pool()
+
+    @property
+    def retry_policy(self):
+        return self.config.retry_policy
+
+    @property
+    def server(self):
+        return self.config.server
+
+    def __getstate__(self):
+        # The session pool and lock cannot be pickled
+        state = self.__dict__.copy()
+        del state['_session_pool']
+        del state['_session_pool_lock']
+        return state
+
+    def __setstate__(self, state):
+        # Restore the session pool and lock
+        self.__dict__.update(state)
+        self._session_pool = self._create_session_pool()
+        self._session_pool_lock = Lock()
 
     def __del__(self):
         # pylint: disable=bare-except
         try:
             self.close()
-        except:  # nosec
+        except Exception:  # nosec
             # __del__ should never fail
             pass
 
@@ -92,6 +140,25 @@ class BaseProtocol(object):
             pool_maxsize=cls.CONNECTIONS_PER_SESSION,
             max_retries=0,
         )
+
+    def get_auth_type(self):
+        # Autodetect and return authentication type
+        raise NotImplementedError()
+
+    @classmethod
+    def get_useragent(cls):
+        if not cls.USERAGENT:
+            # import here to avoid a cyclic import
+            from exchangelib import __version__
+            cls.USERAGENT = "exchangelib/%s (%s)" % (__version__, requests.utils.default_user_agent())
+        return cls.USERAGENT
+
+    def _create_session_pool(self):
+        # Create a pool to reuse sessions containing connections to the server
+        session_pool = LifoQueue(maxsize=self._session_pool_size)
+        for _ in range(self._session_pool_size):
+            session_pool.put(self.create_session(), block=False)
+        return session_pool
 
     @property
     def session_pool_size(self):
@@ -148,25 +215,124 @@ class BaseProtocol(object):
         del session
         return self.create_session()
 
+    def refresh_credentials(self, session):
+        # Credentials need to be refreshed, probably due to an OAuth
+        # access token expiring. If we've gotten here, it's because the
+        # application didn't provide an OAuth client secret, so we can't
+        # handle token refreshing for it.
+        with self.credentials.lock:
+            if hash(self.credentials) == session.credentials_hash:
+                # Credentials have not been refreshed by another thread:
+                # they're the same as the session was created with. If
+                # this isn't the case, we can just go ahead with a new
+                # session using the already-updated credentials.
+                self.credentials.refresh()
+        return self.renew_session(session)
+
     def create_session(self):
-        session = requests.sessions.Session()
+        with self.credentials.lock:
+            if self.auth_type is None:
+                raise ValueError('Cannot create session without knowing the auth type')
+            if isinstance(self.credentials, OAuth2Credentials):
+                session = self.create_oauth2_session()
+            elif self.credentials:
+                if self.auth_type == NTLM and self.credentials.type == self.credentials.EMAIL:
+                    username = '\\' + self.credentials.username
+                else:
+                    username = self.credentials.username
+                session = self.raw_session()
+                session.auth = get_auth_instance(auth_type=self.auth_type, username=username,
+                                                 password=self.credentials.password)
+            else:
+                if self.auth_type not in (GSSAPI, SSPI):
+                    raise ValueError('Auth type %r requires credentials' % self.auth_type)
+                session = self.raw_session()
+                session.auth = get_auth_instance(auth_type=self.auth_type)
+            # Keep track of the credentials used to create this session. If
+            # and when we need to renew credentials (for example, refreshing
+            # an OAuth access token), this lets us easily determine whether
+            # the credentials have already been refreshed in another thread
+            # by the time this session tries.
+            session.credentials_hash = hash(self.credentials)
         # Add some extra info
         session.session_id = sum(map(ord, str(os.urandom(100))))  # Used for debugging messages in services
         session.protocol = self
-        session.auth = get_auth_instance(credentials=self.credentials, auth_type=self.auth_type)
-        # Create a copy of the headers because headers are mutable and session users may modify headers
-        session.headers.update(DEFAULT_HEADERS.copy())
-        session.mount('http://', adapter=self.get_adapter())
-        session.mount('https://', adapter=self.get_adapter())
         log.debug('Server %s: Created session %s', self.server, session.session_id)
         return session
 
+    def create_oauth2_session(self):
+        if self.auth_type != OAUTH2:
+            raise ValueError('Auth type must be %r for credentials type OAuth2Credentials' % OAUTH2)
+
+        has_token = False
+        scope = ['https://outlook.office365.com/.default']
+        session_params = {}
+        token_params = {}
+
+        if isinstance(self.credentials, OAuth2AuthorizationCodeCredentials):
+            # Ask for a refresh token
+            scope.append('offline_access')
+
+            # We don't know (or need) the Microsoft tenant ID. Use
+            # common/ to let Microsoft select the appropriate tenant
+            # for the provided authorization code or refresh token.
+            #
+            # Suppress looks-like-password warning from Bandit.
+            token_url = 'https://login.microsoftonline.com/common/oauth2/v2.0/token'  # nosec
+
+            client_params = {}
+            has_token = self.credentials.access_token is not None
+            if has_token:
+                session_params['token'] = self.credentials.access_token
+            elif self.credentials.authorization_code is not None:
+                token_params['code'] = self.credentials.authorization_code
+                self.credentials.authorization_code = None
+
+            if self.credentials.client_id is not None and self.credentials.client_secret is not None:
+                # If we're given a client ID and secret, we have enough
+                # to refresh access tokens ourselves. In other cases the
+                # session will raise TokenExpiredError and we'll need to
+                # ask the calling application to refresh the token (that
+                # covers cases where the caller doesn't have access to
+                # the client secret but is working with a service that
+                # can provide it refreshed tokens on a limited basis).
+                session_params.update({
+                    'auto_refresh_kwargs': {
+                        'client_id': self.credentials.client_id,
+                        'client_secret': self.credentials.client_secret,
+                    },
+                    'auto_refresh_url': token_url,
+                    'token_updater': self.credentials.on_token_auto_refreshed,
+                })
+            client = WebApplicationClient(self.credentials.client_id, **client_params)
+        else:
+            token_url = 'https://login.microsoftonline.com/%s/oauth2/v2.0/token' % self.credentials.tenant_id
+            client = BackendApplicationClient(client_id=self.credentials.client_id)
+
+        session = self.raw_session(client, session_params)
+        if not has_token:
+            # Fetch the token explicitly -- it doesn't occur implicitly
+            token = session.fetch_token(token_url=token_url, client_id=self.credentials.client_id,
+                                        client_secret=self.credentials.client_secret, scope=scope,
+                                        **token_params)
+            # Allow the credentials object to update its copy of the new
+            # token, and give the application an opportunity to cache it
+            self.credentials.on_token_auto_refreshed(token)
+        session.auth = get_auth_instance(auth_type=OAUTH2, client=client)
+
+        return session
+
     @classmethod
-    def raw_session(cls):
-        s = requests.sessions.Session()
-        s.mount('http://', adapter=cls.get_adapter())
-        s.mount('https://', adapter=cls.get_adapter())
-        return s
+    def raw_session(cls, oauth2_client=None, oauth2_session_params=None):
+        if oauth2_client:
+            session = OAuth2Session(client=oauth2_client, **(oauth2_session_params or {}))
+        else:
+            session = requests.sessions.Session()
+        session.headers.update(DEFAULT_HEADERS)
+        session.headers["User-Agent"] = cls.get_useragent()
+        session.mount('http://', adapter=cls.get_adapter())
+        session.mount('https://', adapter=cls.get_adapter())
+        return session
 
     def __repr__(self):
         return self.__class__.__name__ + repr((self.service_endpoint, self.credentials, self.auth_type))
@@ -186,7 +352,7 @@ class CachingProtocol(type):
 
         # We may be using multiple different credentials and changing our minds on TLS verification. This key
         # combination should be safe.
-        _protocol_cache_key = kwargs['service_endpoint'], kwargs['credentials']
+        _protocol_cache_key = kwargs['config'].service_endpoint, kwargs['config'].credentials
 
         protocol = cls._protocol_cache.get(_protocol_cache_key)
         if isinstance(protocol, Exception):
@@ -208,7 +374,7 @@ class CachingProtocol(type):
                 return protocol
             log.debug("Protocol __call__ cache miss. Adding key '%s'", str(_protocol_cache_key))
             try:
-                protocol = super(CachingProtocol, cls).__call__(*args, **kwargs)
+                protocol = super().__call__(*args, **kwargs)
             except TransportError as e:
                 # This can happen if, for example, autodiscover supplies us with a bogus EWS endpoint
                 log.warning('Failed to create cached protocol with key %s: %s', _protocol_cache_key, e)
@@ -228,49 +394,30 @@ class CachingProtocol(type):
         mcs._protocol_cache.clear()
 
 
-@python_2_unicode_compatible
-class Protocol(with_metaclass(CachingProtocol, BaseProtocol)):
+class Protocol(BaseProtocol, metaclass=CachingProtocol):
     def __init__(self, *args, **kwargs):
-        version = kwargs.pop('version', None)
-        super(Protocol, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
+        self._api_version_hint = None
+        self._version_lock = Lock()
 
-        scheme = 'https' if self.has_ssl else 'http'
-        self.wsdl_url = '%s://%s/EWS/Services.wsdl' % (scheme, self.server)
-        self.messages_url = '%s://%s/EWS/messages.xsd' % (scheme, self.server)
-        self.types_url = '%s://%s/EWS/types.xsd' % (scheme, self.server)
+    def get_auth_type(self):
+        # Autodetect authentication type. We also set version hint here.
+        name = str(self.credentials) if self.credentials and str(self.credentials) else 'DUMMY'
+        auth_type, api_version_hint = get_service_authtype(
+            service_endpoint=self.service_endpoint, retry_policy=self.retry_policy, api_versions=API_VERSIONS, name=name
+        )
+        self._api_version_hint = api_version_hint
+        return auth_type
 
-        # Autodetect authentication type if necessary
-        # pylint: disable=access-member-before-definition
-        if self.auth_type is None:
-            self.auth_type = get_service_authtype(service_endpoint=self.service_endpoint, versions=API_VERSIONS,
-                                                  name=self.credentials.username)
-
-        # Default to the auth type used by the service. We only need this if 'version' is None
-        self.docs_auth_type = self.auth_type
-
-        # Try to behave nicely with the Exchange server. We want to keep the connection open between requests.
-        # We also want to re-use sessions, to avoid the NTLM auth handshake on every request.
-        self._session_pool = self._create_session_pool()
-        self._session_pool_lock = Lock()
-
-        if version:
-            isinstance(version, Version)
-            self.version = version
-        else:
-            # Version.guess() needs auth objects and a working session pool
-            try:
-                # Try to get the auth_type of 'types.xsd' so we can fetch it and look at the version contained there
-                self.docs_auth_type = get_docs_authtype(docs_url=self.types_url)
-            except TransportError:
-                pass
-            self.version = Version.guess(self)
-
-    def _create_session_pool(self):
-        # Create a pool to reuse sessions containing connections to the server
-        session_pool = LifoQueue(maxsize=self._session_pool_size)
-        for _ in range(self._session_pool_size):
-            session_pool.put(self.create_session(), block=False)
-        return session_pool
+    @property
+    def version(self):
+        # Make sure only one thread does the guessing.
+        if not self.config.version or not self.config.version.build:
+            with self._version_lock:
+                if not self.config.version or not self.config.version.build:
+                    # Version.guess() needs auth objects and a working session pool
+                    self.config.version = Version.guess(self, api_version_hint=self._api_version_hint)
+        return self.config.version
 
     @threaded_cached_property
     def thread_pool(self):
@@ -280,6 +427,17 @@ class Protocol(with_metaclass(CachingProtocol, BaseProtocol)):
         # leave open threads around to be garbage collected.
         thread_poolsize = 4 * self._session_pool_size
         return ThreadPool(processes=thread_poolsize)
+
+    def close(self):
+        log.debug('Server %s: Closing thread pool', self.server)
+        # Close the thread pool before closing the session pool to ensure all sessions are released.
+        if "thread_pool" in self.__dict__:
+            # Calling thread_pool.join() in Python 3.8 will hang forever. This is seen when running a test case that
+            # uses the thread pool, e.g.: python tests/__init__.py MessagesTest.test_export_with_error
+            # I don't know yet why this is happening.
+            self.thread_pool.terminate()
+            del self.__dict__["thread_pool"]
+        super().close()
 
     def get_timezones(self, timezones=None, return_full_timezone_data=False):
         """ Get timezone definitions from the server
@@ -377,13 +535,13 @@ class Protocol(with_metaclass(CachingProtocol, BaseProtocol)):
         :return: List of Mailbox items that are members of the distribution list
         """
         from .properties import DLMailbox
-        if isinstance(distribution_list, string_types):
+        if isinstance(distribution_list, str):
             distribution_list = DLMailbox(email_address=distribution_list, mailbox_type='PublicDL')
         return list(ExpandDL(protocol=self).call(distribution_list=distribution_list))
 
     def get_searchable_mailboxes(self, search_filter=None, expand_group_membership=False):
         """This method is only available to users who have been assigned the Discovery Management RBAC role. See
-        https://technet.microsoft.com/en-us/library/jj200692(v=exchg.150).aspx.
+        https://docs.microsoft.com/en-us/exchange/permissions-exo/permissions-exo
 
         :param search_filter: Is set, must be a single email alias
         :param expand_group_membership: If True, returned distribution lists are expanded
@@ -394,44 +552,138 @@ class Protocol(with_metaclass(CachingProtocol, BaseProtocol)):
             expand_group_membership=expand_group_membership,
         ))
 
+    def convert_ids(self, ids, destination_format):
+        """Converts item and folder IDs between multiple formats
+
+        :param ids: a list of AlternateId, AlternatePublicFolderId or AlternatePublicFolderItemId instances
+        :param destination_format: A string
+        :return: a generator of AlternateId, AlternatePublicFolderId or AlternatePublicFolderItemId instances
+        """
+        from .properties import ID_FORMATS, AlternateId, AlternatePublicFolderId, AlternatePublicFolderItemId
+        if destination_format not in ID_FORMATS:
+            raise ValueError("'destination_format' %r must be one of %s" % (destination_format, ID_FORMATS))
+        cls_map = {cls.response_tag(): cls for cls in (
+            AlternateId, AlternatePublicFolderId, AlternatePublicFolderItemId
+        )}
+        for i in ConvertId(protocol=self).call(items=ids, destination_format=destination_format):
+            if isinstance(i, Exception):
+                yield i
+            else:
+                id_cls = cls_map[i.tag]
+                yield id_cls.from_xml(i, account=None)
+
     def __getstate__(self):
-        # The thread and session pools cannot be pickled
-        state = self.__dict__.copy()
+        # The lock and thread pool cannot be pickled
+        state = super().__getstate__()
+        del state['_version_lock']
         try:
             del state['thread_pool']
         except KeyError:
             # thread_pool is a cached property and may not exist
             pass
-        del state['_session_pool']
-        del state['_session_pool_lock']
         return state
 
     def __setstate__(self, state):
-        # Restore the session pool. The thread pool is a property and will recreate itself
+        # Restore the lock. The thread pool is a cached property and will be recreated automatically.
         self.__dict__.update(state)
-        self._session_pool = self._create_session_pool()
-        self._session_pool_lock = Lock()
+        self._version_lock = Lock()
 
     def __str__(self):
+        # Don't trigger version guessing here just for the sake of printing
+        if self.config.version:
+            fullname, api_version, build = self.version.fullname, self.version.api_version, self.version.build
+        else:
+            fullname, api_version, build = '[unknown]', '[unknown]', '[unknown]'
+
         return '''\
 EWS url: %s
 Product name: %s
 EWS API version: %s
 Build number: %s
-EWS auth: %s
-XSD auth: %s''' % (
-            self.service_endpoint,
-            self.version.fullname,
-            self.version.api_version,
-            self.version.build,
-            self.auth_type,
-            self.docs_auth_type,
-        )
+EWS auth: %s''' % (self.service_endpoint, fullname, api_version, build, self.auth_type)
 
 
 class NoVerifyHTTPAdapter(requests.adapters.HTTPAdapter):
-    # An HTTP adapter that ignores TLS validation errors. Use at own risk.
+    """An HTTP adapter that ignores TLS validation errors. Use at own risk."""
     def cert_verify(self, conn, url, verify, cert):
         # pylint: disable=unused-argument
         # We're overiding a method so we have to keep the signature
-        super(NoVerifyHTTPAdapter, self).cert_verify(conn=conn, url=url, verify=False, cert=cert)
+        super().cert_verify(conn=conn, url=url, verify=False, cert=cert)
+
+
+class RetryPolicy:
+    """Stores retry logic used when faced with errors from the server"""
+    @property
+    def fail_fast(self):
+        # Used to choose the error handling policy. When True, a fault-tolerant policy is used. False, a fail-fast
+        # policy is used.
+        raise NotImplementedError()
+
+    @property
+    def back_off_until(self):
+        raise NotImplementedError()
+
+    @back_off_until.setter
+    def back_off_until(self, value):
+        raise NotImplementedError()
+
+
+class FailFast(RetryPolicy):
+    """Fail immediately on server errors"""
+    @property
+    def fail_fast(self):
+        return True
+
+    @property
+    def back_off_until(self):
+        return None
+
+
+class FaultTolerance(RetryPolicy):
+    """Enables fault-tolerant error handling. Tells internal methods to do an exponential back off when requests start
+    failing, and wait up to max_wait seconds before failing.
+    """
+    def __init__(self, max_wait=3600):
+        self.max_wait = max_wait
+        self._back_off_until = None
+        self._back_off_lock = Lock()
+
+    def __getstate__(self):
+        # Locks cannot be pickled
+        state = self.__dict__.copy()
+        del state['_back_off_lock']
+        return state
+
+    def __setstate__(self, state):
+        # Restore the lock
+        self.__dict__.update(state)
+        self._back_off_lock = Lock()
+
+    @property
+    def fail_fast(self):
+        return False
+
+    @property
+    def back_off_until(self):
+        """Returns the back off value as a datetime. Resets the current back off value if it has expired."""
+        if self._back_off_until is None:
+            return None
+        with self._back_off_lock:
+            if self._back_off_until is None:
+                return None
+            if self._back_off_until < datetime.datetime.now():
+                self._back_off_until = None  # The back off value has expired. Reset
+                return None
+            return self._back_off_until
+
+    @back_off_until.setter
+    def back_off_until(self, value):
+        with self._back_off_lock:
+            self._back_off_until = value
+
+    def back_off(self, seconds):
+        if seconds is None:
+            seconds = 60  # Back off 60 seconds if we didn't get an explicit suggested value
+        value = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
+        with self._back_off_lock:
+            self._back_off_until = value

@@ -1,17 +1,16 @@
-# coding=utf-8
 """
-Implement a selection of EWS services.
+Implement a selection of EWS services (operations).
 
 Exchange is very picky about things like the order of XML elements in SOAP requests, so we need to generate XML
 automatically instead of taking advantage of Python SOAP libraries and the WSDL file.
 
-Exchange EWS references:
-    - 2007: http://msdn.microsoft.com/en-us/library/bb409286(v=exchg.80).aspx
-    - 2010: http://msdn.microsoft.com/en-us/library/bb409286(v=exchg.140).aspx
-    - 2013: http://msdn.microsoft.com/en-us/library/bb409286(v=exchg.150).aspx
+Exchange EWS operations overview:
+    https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/ews-operations-in-exchange
 """
 
 from .common import CHUNK_SIZE
+from .archive_item import ArchiveItem
+from .convert_id import ConvertId
 from .copy_item import CopyItem
 from .create_attachment import CreateAttachment
 from .create_folder import CreateFolder
@@ -26,8 +25,10 @@ from .find_folder import FindFolder
 from .find_item import FindItem
 from .find_people import FindPeople
 from .get_attachment import GetAttachment
+from .get_delegate import GetDelegate
 from .get_folder import GetFolder
 from .get_item import GetItem
+from .get_mail_tips import GetMailTips
 from .get_persona import GetPersona
 from .get_room_lists import GetRoomLists
 from .get_rooms import GetRooms
@@ -45,6 +46,8 @@ from .upload_items import UploadItems
 
 __all__ = [
     'CHUNK_SIZE',
+    'ArchiveItem',
+    'ConvertId',
     'CopyItem',
     'CreateAttachment',
     'CreateFolder',
@@ -59,8 +62,10 @@ __all__ = [
     'FindItem',
     'FindPeople',
     'GetAttachment',
+    'GetDelegate',
     'GetFolder',
     'GetItem',
+    'GetMailTips',
     'GetPersona',
     'GetRoomLists',
     'GetRooms',

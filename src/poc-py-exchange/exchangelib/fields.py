@@ -1,5 +1,3 @@
-from __future__ import unicode_literals
-
 import abc
 import base64
 import binascii
@@ -8,17 +6,16 @@ import datetime
 from decimal import Decimal, InvalidOperation
 import logging
 
-from six import string_types
-
 from .errors import ErrorInvalidServerVersion
 from .ewsdatetime import EWSDateTime, EWSDate, EWSTimeZone, NaiveDateTimeNotAllowed, UnknownTimeZone
-from .util import create_element, get_xml_attrs, set_xml_value, value_to_xml_text, is_iterable, TNS
-from .version import Build, EXCHANGE_2013
+from .util import create_element, get_xml_attrs, set_xml_value, value_to_xml_text, is_iterable, safe_b64decode, TNS
+from .version import Build, Version, EXCHANGE_2013
 
 log = logging.getLogger(__name__)
 
 
-# DayOfWeekIndex enum. See https://msdn.microsoft.com/en-us/library/office/aa581350(v=exchg.150).aspx
+# DayOfWeekIndex enum. See
+# https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/dayofweekindex
 FIRST = 'First'
 SECOND = 'Second'
 THIRD = 'Third'
@@ -57,7 +54,8 @@ WEEK_DAY = 'Weekday'  # Non-weekend day
 WEEKEND_DAY = 'WeekendDay'
 EXTRA_WEEKDAY_OPTIONS = (DAY, WEEK_DAY, WEEKEND_DAY)
 
-# DaysOfWeek enum: See https://msdn.microsoft.com/en-us/library/office/ee332417(v=exchg.150).aspx
+# DaysOfWeek enum: See
+# https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/daysofweek-daysofweektype
 WEEKDAYS = WEEKDAY_NAMES + EXTRA_WEEKDAY_OPTIONS
 
 
@@ -68,7 +66,7 @@ def split_field_path(field_path):
         'phone_numbers__PrimaryPhone' -> ('phone_numbers', 'PrimaryPhone', None)
         'physical_addresses__Home__street' -> ('physical_addresses', 'Home', 'street')
     """
-    if not isinstance(field_path, string_types):
+    if not isinstance(field_path, str):
         raise ValueError("Field path %r must be a string" % field_path)
     search_parts = field_path.split('__')
     field = search_parts[0]
@@ -97,7 +95,7 @@ def resolve_field_path(field_path, folder, strict=True):
                 % (field_path, fieldname, field.value_cls.get_field_by_fieldname('label').default)
             )
         valid_labels = field.value_cls.get_field_by_fieldname('label').supported_choices(
-            version=folder.root.account.version
+            version=folder.account.version
         )
         if label and label not in valid_labels:
             raise ValueError(
@@ -116,7 +114,7 @@ def resolve_field_path(field_path, folder, strict=True):
                     subfield = field.value_cls.get_field_by_fieldname(subfieldname)
                 except ValueError:
                     fnames = ', '.join(f.name for f in field.value_cls.supported_fields(
-                        version=folder.root.account.version
+                        version=folder.account.version
                     ))
                     raise ValueError(
                         "Subfield '%s' on IndexedField path '%s' must be one of %s"
@@ -130,7 +128,7 @@ def resolve_field_path(field_path, folder, strict=True):
                     "IndexedField path '%s' must not specify subfield, e.g. just '%s__%s'"
                     % (field_path, fieldname, label)
                 )
-            subfield = field.value_cls.value_field(version=folder.root.account.version)
+            subfield = field.value_cls.value_field(version=folder.account.version)
     else:
         if label or subfieldname:
             raise ValueError(
@@ -140,7 +138,7 @@ def resolve_field_path(field_path, folder, strict=True):
     return field, label, subfield
 
 
-class FieldPath(object):
+class FieldPath:
     """ Holds values needed to point to a single field. For indexed properties, we allow setting either field,
     field and label, or field, label and subfield. This allows pointing to either the full indexed property set, a
     property with a specific label, or a particular subfield field on that property. """
@@ -148,8 +146,8 @@ class FieldPath(object):
         # 'label' and 'subfield' are only used for IndexedField fields
         if not isinstance(field, (FieldURIField, ExtendedPropertyField)):
             raise ValueError("'field' %r must be an FieldURIField, of ExtendedPropertyField instance" % field)
-        if label and not isinstance(label, string_types):
-            raise ValueError("'label' %r must be a %s instance" % (label, string_types))
+        if label and not isinstance(label, str):
+            raise ValueError("'label' %r must be a %s instance" % (label, str))
         if subfield and not isinstance(subfield, SubField):
             raise ValueError("'subfield' %r must be a SubField instance" % subfield)
         self.field = field
@@ -216,7 +214,7 @@ class FieldPath(object):
         return hash((self.field, self.label, self.subfield))
 
 
-class FieldOrder(object):
+class FieldOrder:
     """ Holds values needed to call server-side sorting on a single field path """
     def __init__(self, field_path, reverse=False):
         if not isinstance(field_path, FieldPath):
@@ -239,11 +237,10 @@ class FieldOrder(object):
         return field_order
 
 
-class Field(object):
+class Field(metaclass=abc.ABCMeta):
     """
     Holds information related to an item field
     """
-    __metaclass__ = abc.ABCMeta
     value_cls = None
     is_list = False
     # Is the field a complex EWS type? Quoting the EWS FindItem docs:
@@ -283,7 +280,7 @@ class Field(object):
         self.deprecated_from = deprecated_from
 
     def clean(self, value, version=None):
-        if not self.supports_version(version):
+        if version and not self.supports_version(version):
             raise ErrorInvalidServerVersion("Field '%s' does not support EWS builds prior to %s (server has %s)" % (
                 self.name, self.supported_from, version))
         if value is None:
@@ -315,8 +312,8 @@ class Field(object):
 
     def supports_version(self, version):
         # 'version' is a Version instance, for convenience by callers
-        if not version:
-            return True
+        if not isinstance(version, Version):
+            raise ValueError("'version' %r must be a Version instance" % version)
         if self.supported_from and version.build < self.supported_from:
             return False
         if self.deprecated_from and version.build >= self.deprecated_from:
@@ -336,12 +333,12 @@ class Field(object):
 
 
 class FieldURIField(Field):
-    namespace = TNS
-
     def __init__(self, *args, **kwargs):
         self.field_uri = kwargs.pop('field_uri', None)
-        super(FieldURIField, self).__init__(*args, **kwargs)
-        # See all valid FieldURI values at https://msdn.microsoft.com/en-us/library/office/aa494315(v=exchg.150).aspx
+        self.namespace = kwargs.pop('namespace', TNS)
+        super().__init__(*args, **kwargs)
+        # See all valid FieldURI values at
+        # https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/fielduri
         # The field_uri has a prefix when the FieldURI points to an Item field.
         if self.field_uri is None:
             self.field_uri_postfix = None
@@ -385,18 +382,30 @@ class FieldURIField(Field):
 class BooleanField(FieldURIField):
     value_cls = bool
 
+    def __init__(self, *args, **kwargs):
+        self.true_val = kwargs.pop('true_val', 'true')
+        self.false_val = kwargs.pop('false_val', 'false')
+        super().__init__(*args, **kwargs)
+
     def from_xml(self, elem, account):
         val = self._get_val_from_elem(elem)
         if val is not None:
             try:
                 return {
-                    'true': True,
-                    'false': False,
-                }[val]
+                    self.true_val: True,
+                    self.false_val: False,
+                }[val.lower()]
             except KeyError:
                 log.warning("Cannot convert value '%s' on field '%s' to type %s", val, self.name, self.value_cls)
                 return None
         return self.default
+
+
+class OnOffField(BooleanField):
+    def __init__(self, *args, **kwargs):
+        kwargs['true_val'] = 'on'
+        kwargs['false_val'] = 'off'
+        super().__init__(*args, **kwargs)
 
 
 class IntegerField(FieldURIField):
@@ -405,10 +414,10 @@ class IntegerField(FieldURIField):
     def __init__(self, *args, **kwargs):
         self.min = kwargs.pop('min', None)
         self.max = kwargs.pop('max', None)
-        super(IntegerField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def clean(self, value, version=None):
-        value = super(IntegerField, self).clean(value, version=version)
+        value = super().clean(value, version=version)
         if value is not None:
             if self.is_list:
                 for v in value:
@@ -440,8 +449,9 @@ class DecimalField(IntegerField):
 
 
 class EnumField(IntegerField):
-    # A field type where you can enter either the 1-based index in an enum (tuple), or the enum value. Values will be
-    # stored internally as integers but output in XML as strings.
+    """A field type where you can enter either the 1-based index in an enum (tuple), or the enum value. Values will be
+    stored internally as integers but output in XML as strings.
+    """
     def __init__(self, *args, **kwargs):
         self.enum = kwargs.pop('enum')
         # Set different min/max defaults than IntegerField
@@ -449,13 +459,13 @@ class EnumField(IntegerField):
             raise AttributeError("EnumField does not support the 'max' attribute")
         kwargs['min'] = kwargs.pop('min', 1)
         kwargs['max'] = kwargs['min'] + len(self.enum) - 1
-        super(EnumField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def clean(self, value, version=None):
         if self.is_list:
             value = list(value)  # Convert to something we can index
             for i, v in enumerate(value):
-                if isinstance(v, string_types):
+                if isinstance(v, str):
                     if v not in self.enum:
                         raise ValueError(
                             "List value '%s' on field '%s' must be one of %s" % (v, self.name, self.enum))
@@ -465,16 +475,16 @@ class EnumField(IntegerField):
             if len(value) > len(set(value)):
                 raise ValueError("List entries '%s' on field '%s' must be unique" % (value, self.name))
         else:
-            if isinstance(value, string_types):
+            if isinstance(value, str):
                 if value not in self.enum:
                     raise ValueError(
                         "Value '%s' on field '%s' must be one of %s" % (value, self.name, self.enum))
                 value = self.enum.index(value) + 1
-        return super(EnumField, self).clean(value, version=version)
+        return super().clean(value, version=version)
 
     def as_string(self, value):
         # Converts an integer in the enum to its equivalent string
-        if isinstance(value, string_types):
+        if isinstance(value, str):
             return value
         if self.is_list:
             return [self.enum[v - 1] for v in sorted(value)]
@@ -504,7 +514,7 @@ class EnumListField(EnumField):
 
 
 class EnumAsIntField(EnumField):
-    # Like EnumField, but communicates values with EWS in integers
+    """Like EnumField, but communicates values with EWS in integers"""
     def from_xml(self, elem, account):
         val = self._get_val_from_elem(elem)
         if val is not None:
@@ -527,13 +537,13 @@ class Base64Field(FieldURIField):
     def __init__(self, *args, **kwargs):
         if 'is_searchable' not in kwargs:
             kwargs['is_searchable'] = False
-        super(Base64Field, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def from_xml(self, elem, account):
         val = self._get_val_from_elem(elem)
         if val is not None:
             try:
-                return base64.b64decode(val)
+                return safe_b64decode(val)
             except (TypeError, binascii.Error):
                 log.warning("Cannot convert value '%s' on field '%s' to type %s", val, self.name, self.value_cls)
                 return None
@@ -545,25 +555,10 @@ class Base64Field(FieldURIField):
 
 
 class MimeContentField(Base64Field):
-    # EWS: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/mimecontent
-    value_cls = string_types[0]
-    default_encoding = 'utf-8'
-
-    def from_xml(self, elem, account):
-        val = super(MimeContentField, self).from_xml(elem=elem, account=account)
-        if val is None or val == self.default:
-            # Return default values unaltered
-            return val
-
-        charset = elem.find(self.response_tag()).get('CharacterSet').lower() or self.default_encoding
-        try:
-            return val.decode(charset)
-        except UnicodeDecodeError:
-            log.warning("Cannot decode value '%s' on field '%s' to charset %s", val, self.name, self.value_cls)
-            return None
-
-    def to_xml(self, value, version):
-        return super(MimeContentField, self).to_xml(value=value.encode(self.default_encoding), version=version)
+    # This element has an optional 'CharacterSet' attribute, but it specifies the encoding of the base64-encoded
+    # string (which doesn't make sense since base64 encoded strings are always ASCII). We ignore it here because
+    # the decoded data could be in some other encoding, specified in the "Content-Type:" header.
+    pass
 
 
 class DateField(FieldURIField):
@@ -604,7 +599,7 @@ class DateTimeField(FieldURIField):
     def clean(self, value, version=None):
         if value is not None and isinstance(value, self.value_cls) and not value.tzinfo:
             raise ValueError("Value '%s' on field '%s' must be timezone aware" % (value, self.name))
-        return super(DateTimeField, self).clean(value, version=version)
+        return super().clean(value, version=version)
 
     def from_xml(self, elem, account):
         val = self._get_val_from_elem(elem)
@@ -657,15 +652,12 @@ class TimeZoneField(FieldURIField):
 
 
 class TextField(FieldURIField):
-    # A field that stores a string value with no length limit
-    value_cls = string_types[0]
+    """A field that stores a string value with no length limit"""
+    value_cls = str
     is_complex = True
 
     def from_xml(self, elem, account):
-        if self.is_attribute:
-            val = elem.get(self.field_uri)
-        else:
-            val = self._get_val_from_elem(elem)
+        val = self._get_val_from_elem(elem)
         if val is not None:
             return val
         return self.default
@@ -681,8 +673,27 @@ class TextListField(TextField):
         return self.default
 
 
+class MessageField(TextField):
+    INNER_ELEMENT_NAME = 'Message'
+
+    def from_xml(self, elem, account):
+        reply = elem.find(self.response_tag())
+        if reply is None:
+            return None
+        message = reply.find('{%s}%s' % (TNS, self.INNER_ELEMENT_NAME))
+        if message is None:
+            return None
+        return message.text
+
+    def to_xml(self, value, version):
+        field_elem = create_element(self.request_tag())
+        message = create_element('t:%s' % self.INNER_ELEMENT_NAME)
+        message.text = value
+        return set_xml_value(field_elem, message, version=version)
+
+
 class CharField(TextField):
-    # A field that stores a string value with a limited length
+    """A field that stores a string value with a limited length"""
     is_complex = False
 
     def __init__(self, *args, **kwargs):
@@ -690,10 +701,10 @@ class CharField(TextField):
         if not 1 <= self.max_length <= 255:
             # A field supporting messages longer than 255 chars should be TextField
             raise ValueError("'max_length' must be in the range 1-255")
-        super(CharField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def clean(self, value, version=None):
-        value = super(CharField, self).clean(value, version=version)
+        value = super().clean(value, version=version)
         if value is not None:
             if self.is_list:
                 for v in value:
@@ -706,10 +717,12 @@ class CharField(TextField):
 
 
 class IdField(CharField):
-    # A field to hold the 'Id' and 'Changekey' attributes on 'ItemId' type items. There is no guaranteed max length,
-    # but we can assume 512 bytes in practice. See https://msdn.microsoft.com/en-us/library/office/dn605828(v=exchg.150)
+    """A field to hold the 'Id' and 'Changekey' attributes on 'ItemId' type items. There is no guaranteed max length,
+    but we can assume 512 bytes in practice. See
+    https://docs.microsoft.com/en-us/exchange/client-developer/exchange-web-services/ews-identifiers-in-exchange
+    """
     def __init__(self, *args, **kwargs):
-        super(IdField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.max_length = 512  # This is above the normal 255 limit, but this is actually an attribute, not a field
         self.is_searchable = False
         self.is_attribute = True
@@ -729,30 +742,33 @@ class CharListField(CharField):
 
 
 class URIField(TextField):
-    # Helper to mark strings that must conform to xsd:anyURI
-    # If we want an URI validator, see http://stackoverflow.com/questions/14466585/is-this-regex-correct-for-xsdanyuri
+    """Helper to mark strings that must conform to xsd:anyURI
+    If we want an URI validator, see http://stackoverflow.com/questions/14466585/is-this-regex-correct-for-xsdanyuri
+    """
     pass
 
 
 class EmailAddressField(CharField):
-    # A helper class used for email address string that we can use for email validation
+    """A helper class used for email address string that we can use for email validation"""
     pass
 
 
 class CultureField(CharField):
-    # Helper to mark strings that are # RFC 1766 culture values.
+    """Helper to mark strings that are # RFC 1766 culture values."""
     pass
 
 
-class Choice(object):
-    """ Implements versioned choices for the ChoiceField field"""
+class Choice:
+    """Implements versioned choices for the ChoiceField field"""
     def __init__(self, value, supported_from=None):
         self.value = value
         self.supported_from = supported_from
 
     def supports_version(self, version):
         # 'version' is a Version instance, for convenience by callers
-        if not self.supported_from or not version:
+        if not isinstance(version, Version):
+            raise ValueError("'version' %r must be a Version instance" % version)
+        if not self.supported_from:
             return True
         return version.build >= self.supported_from
 
@@ -760,23 +776,28 @@ class Choice(object):
 class ChoiceField(CharField):
     def __init__(self, *args, **kwargs):
         self.choices = kwargs.pop('choices')
-        super(ChoiceField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def clean(self, value, version=None):
-        value = super(ChoiceField, self).clean(value, version=version)
+        value = super().clean(value, version=version)
         if value is None:
             return None
-        for c in self.choices:
-            if c.value != value:
-                continue
-            if not c.supports_version(version):
-                raise ErrorInvalidServerVersion("Choice '%s' does not support EWS builds prior to %s (server has %s)"
-                                                % (self.name, self.supported_from, version))
-            return value
+        valid_choices = list(c.value for c in self.choices)
+        if version:
+            valid_choices_for_version = self.supported_choices(version=version)
+            if value in valid_choices_for_version:
+                return value
+            if value in valid_choices:
+                raise ErrorInvalidServerVersion("Choice '%s' only supports EWS builds from %s to %s (server has %s)" % (
+                    self.name, self.supported_from or '*', self.deprecated_from or '*', version))
+        else:
+            if value in valid_choices:
+                return value
         raise ValueError("Invalid choice '%s' for field '%s'. Valid choices are: %s" % (
-            value, self.name, ', '.join(self.supported_choices(version=version))))
+            value, self.name, ', '.join(valid_choices)
+        ))
 
-    def supported_choices(self, version=None):
+    def supported_choices(self, version):
         return list(c.value for c in self.choices if c.supports_version(version))
 
 
@@ -787,19 +808,19 @@ FREE_BUSY_CHOICES = [Choice('Free'), Choice('Tentative'), Choice('Busy'), Choice
 class FreeBusyStatusField(ChoiceField):
     def __init__(self, *args, **kwargs):
         kwargs['choices'] = set(FREE_BUSY_CHOICES)
-        super(FreeBusyStatusField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
 
 class BodyField(TextField):
     def __init__(self, *args, **kwargs):
         from .properties import Body
         self.value_cls = Body
-        super(BodyField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def clean(self, value, version=None):
         if value is not None and not isinstance(value, self.value_cls):
             value = self.value_cls(value)
-        return super(BodyField, self).clean(value, version=version)
+        return super().clean(value, version=version)
 
     def from_xml(self, elem, account):
         from .properties import Body, HTMLBody
@@ -827,7 +848,8 @@ class BodyField(TextField):
 class EWSElementField(FieldURIField):
     def __init__(self, *args, **kwargs):
         self.value_cls = kwargs.pop('value_cls')
-        super(EWSElementField, self).__init__(*args, **kwargs)
+        kwargs['namespace'] = kwargs.get('namespace', self.value_cls.NAMESPACE)
+        super().__init__(*args, **kwargs)
 
     def from_xml(self, elem, account):
         if self.is_list:
@@ -862,7 +884,7 @@ class AssociatedCalendarItemIdField(EWSElementField):
     def __init__(self, *args, **kwargs):
         from .properties import AssociatedCalendarItemId
         kwargs['value_cls'] = AssociatedCalendarItemId
-        super(AssociatedCalendarItemIdField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def to_xml(self, value, version):
         return value.to_xml(version=version)
@@ -874,7 +896,7 @@ class RecurrenceField(EWSElementField):
     def __init__(self, *args, **kwargs):
         from .recurrence import Recurrence
         kwargs['value_cls'] = Recurrence
-        super(RecurrenceField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def to_xml(self, value, version):
         return value.to_xml(version=version)
@@ -886,7 +908,7 @@ class ReferenceItemIdField(EWSElementField):
     def __init__(self, *args, **kwargs):
         from .properties import ReferenceItemId
         kwargs['value_cls'] = ReferenceItemId
-        super(ReferenceItemIdField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def to_xml(self, value, version):
         return value.to_xml(version=version)
@@ -901,23 +923,21 @@ class OccurrenceListField(OccurrenceField):
 
 
 class MessageHeaderField(EWSElementListField):
-    is_complex = True
-
     def __init__(self, *args, **kwargs):
         from .properties import MessageHeader
         kwargs['value_cls'] = MessageHeader
-        super(MessageHeaderField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
 
 class BaseEmailField(EWSElementField):
-    # A base class for EWSElement classes that have an 'email_address' field that we want to provide helpers for
+    """A base class for EWSElement classes that have an 'email_address' field that we want to provide helpers for"""
 
     is_complex = True  # FindItem only returns the name, not the email address
 
     def clean(self, value, version=None):
-        if isinstance(value, string_types):
+        if isinstance(value, str):
             value = self.value_cls(email_address=value)
-        return super(BaseEmailField, self).clean(value, version=version)
+        return super().clean(value, version=version)
 
     def from_xml(self, elem, account):
         if self.field_uri is None:
@@ -938,77 +958,72 @@ class BaseEmailField(EWSElementField):
 
 
 class EmailField(BaseEmailField):
-    is_complex = True  # FindItem only returns the name, not the email address
-
     def __init__(self, *args, **kwargs):
         from .properties import Email
         kwargs['value_cls'] = Email
-        super(EmailField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
+
+
+class RecipientAddressField(BaseEmailField):
+    def __init__(self, *args, **kwargs):
+        from .properties import RecipientAddress
+        kwargs['value_cls'] = RecipientAddress
+        super().__init__(*args, **kwargs)
 
 
 class MailboxField(BaseEmailField):
-    is_complex = True  # FindItem only returns the name, not the email address
-
     def __init__(self, *args, **kwargs):
         from .properties import Mailbox
         kwargs['value_cls'] = Mailbox
-        super(MailboxField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
 
 class MailboxListField(EWSElementListField):
-    is_complex = True
-
     def __init__(self, *args, **kwargs):
         from .properties import Mailbox
         kwargs['value_cls'] = Mailbox
-        super(MailboxListField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def clean(self, value, version=None):
         if value is not None:
-            value = [self.value_cls(email_address=s) if isinstance(s, string_types) else s for s in value]
-        return super(MailboxListField, self).clean(value, version=version)
+            value = [self.value_cls(email_address=s) if isinstance(s, str) else s for s in value]
+        return super().clean(value, version=version)
 
 
 class MemberListField(EWSElementListField):
-    is_complex = True
-
     def __init__(self, *args, **kwargs):
         from .properties import Member
         kwargs['value_cls'] = Member
-        super(MemberListField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def clean(self, value, version=None):
         if value is not None:
             from .properties import Mailbox
             value = [
-                self.value_cls(mailbox=Mailbox(email_address=s)) if isinstance(s, string_types) else s for s in value
+                self.value_cls(mailbox=Mailbox(email_address=s)) if isinstance(s, str) else s for s in value
             ]
-        return super(MemberListField, self).clean(value, version=version)
+        return super().clean(value, version=version)
 
 
 class AttendeesField(EWSElementListField):
-    is_complex = True
-
     def __init__(self, *args, **kwargs):
         from .properties import Attendee
         kwargs['value_cls'] = Attendee
-        super(AttendeesField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def clean(self, value, version=None):
         from .properties import Mailbox
         if value is not None:
             value = [self.value_cls(mailbox=Mailbox(email_address=s), response_type='Accept')
-                     if isinstance(s, string_types) else s for s in value]
-        return super(AttendeesField, self).clean(value, version=version)
+                     if isinstance(s, str) else s for s in value]
+        return super().clean(value, version=version)
 
 
 class AttachmentField(EWSElementListField):
-    is_complex = True
-
     def __init__(self, *args, **kwargs):
         from .attachments import Attachment
         kwargs['value_cls'] = Attachment
-        super(AttachmentField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def from_xml(self, elem, account):
         from .attachments import FileAttachment, ItemAttachment
@@ -1025,9 +1040,9 @@ class AttachmentField(EWSElementListField):
 
 
 class LabelField(ChoiceField):
-    # A field to hold the label on an IndexedElement
+    """A field to hold the label on an IndexedElement"""
     def __init__(self, *args, **kwargs):
-        super(LabelField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.is_attribute = True
 
     def from_xml(self, elem, account):
@@ -1038,7 +1053,7 @@ class SubField(Field):
     namespace = TNS
 
     # A field to hold the value on an SingleFieldIndexedElement
-    value_cls = string_types[0]
+    value_cls = str
 
     def from_xml(self, elem, account):
         return elem.text
@@ -1061,22 +1076,22 @@ class SubField(Field):
 
 
 class EmailSubField(SubField):
-    # A field to hold the value on an SingleFieldIndexedElement
-    value_cls = string_types[0]
+    """A field to hold the value on an SingleFieldIndexedElement"""
+    value_cls = str
 
     def from_xml(self, elem, account):
         return elem.text or elem.get('Name')  # Sometimes elem.text is empty. Exchange saves the same in 'Name' attr
 
 
 class NamedSubField(SubField):
-    # A field to hold the value on an MultiFieldIndexedElement
-    value_cls = string_types[0]
+    """A field to hold the value on an MultiFieldIndexedElement"""
+    value_cls = str
 
     def __init__(self, *args, **kwargs):
         self.field_uri = kwargs.pop('field_uri')
         if ':' in self.field_uri:
             raise ValueError("'field_uri' value must not contain a colon")
-        super(NamedSubField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def from_xml(self, elem, account):
         field_elem = elem.find(self.response_tag())
@@ -1115,9 +1130,8 @@ class IndexedField(EWSElementField):
         # Callers must call field_uri_xml() on the subfield
         raise NotImplementedError()
 
-    @classmethod
-    def response_tag(cls):
-        return '{%s}%s' % (cls.namespace, cls.PARENT_ELEMENT_NAME)
+    def response_tag(self):
+        return '{%s}%s' % (self.namespace, self.PARENT_ELEMENT_NAME)
 
     def __hash__(self):
         return hash(self.field_uri)
@@ -1131,7 +1145,7 @@ class EmailAddressesField(IndexedField):
     def __init__(self, *args, **kwargs):
         from .indexed_properties import EmailAddress
         kwargs['value_cls'] = EmailAddress
-        super(EmailAddressesField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def field_uri_xml(self):
         raise NotImplementedError()
@@ -1145,14 +1159,13 @@ class PhoneNumberField(IndexedField):
     def __init__(self, *args, **kwargs):
         from .indexed_properties import PhoneNumber
         kwargs['value_cls'] = PhoneNumber
-        super(PhoneNumberField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def field_uri_xml(self):
         raise NotImplementedError()
 
 
 class PhysicalAddressField(IndexedField):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa564323(v=exchg.150).aspx
     is_list = True
 
     PARENT_ELEMENT_NAME = 'PhysicalAddresses'
@@ -1160,7 +1173,7 @@ class PhysicalAddressField(IndexedField):
     def __init__(self, *args, **kwargs):
         from .indexed_properties import PhysicalAddress
         kwargs['value_cls'] = PhysicalAddress
-        super(PhysicalAddressField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def field_uri_xml(self):
         raise NotImplementedError()
@@ -1169,7 +1182,7 @@ class PhysicalAddressField(IndexedField):
 class ExtendedPropertyField(Field):
     def __init__(self, *args, **kwargs):
         self.value_cls = kwargs.pop('value_cls')
-        super(ExtendedPropertyField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def clean(self, value, version=None):
         if value is None:
@@ -1203,13 +1216,7 @@ class ExtendedPropertyField(Field):
     def from_xml(self, elem, account):
         extended_properties = elem.findall(self.value_cls.response_tag())
         for extended_property in extended_properties:
-            extended_field_uri = extended_property.find('{%s}ExtendedFieldURI' % TNS)
-            match = True
-            for k, v in self.value_cls.properties_map().items():
-                if extended_field_uri.get(k) != v:
-                    match = False
-                    break
-            if match:
+            if self.value_cls.is_property_instance(extended_property):
                 return self.value_cls.from_xml(elem=extended_property, account=account)
         return self.default
 
@@ -1258,11 +1265,38 @@ class PermissionSetField(EWSElementField):
     def __init__(self, *args, **kwargs):
         from .properties import PermissionSet
         kwargs['value_cls'] = PermissionSet
-        super(PermissionSetField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
 
 class EffectiveRightsField(EWSElementField):
     def __init__(self, *args, **kwargs):
         from .properties import EffectiveRights
         kwargs['value_cls'] = EffectiveRights
-        super(EffectiveRightsField, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
+
+
+class BuildField(CharField):
+    def __init__(self, *args, **kwargs):
+        from .version import Build
+        super().__init__(*args, **kwargs)
+        self.value_cls = Build
+
+    def from_xml(self, elem, account):
+        val = super().from_xml(elem=elem, account=account)
+        if val:
+            try:
+                return self.value_cls.from_hex_string(val)
+            except (TypeError, ValueError):
+                log.warning('Invalid server version string: %r', val)
+        return val
+
+
+class ProtocolListField(EWSElementListField):
+    # There is not containing element for this field. Just multiple 'Protocol' elements on the 'Account' element.
+    def __init__(self, *args, **kwargs):
+        from .autodiscover.properties import Protocol
+        kwargs['value_cls'] = Protocol
+        super().__init__(*args, **kwargs)
+
+    def from_xml(self, elem, account):
+        return [self.value_cls.from_xml(elem=e, account=account) for e in elem.findall(self.value_cls.response_tag())]

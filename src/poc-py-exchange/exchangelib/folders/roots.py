@@ -1,43 +1,70 @@
-from __future__ import unicode_literals
-
 import logging
-
-from six import text_type
 
 from ..errors import ErrorAccessDenied, ErrorFolderNotFound, ErrorNoPublicFolderReplicaAvailable, ErrorItemNotFound, \
     ErrorInvalidOperation
+from ..fields import EffectiveRightsField
 from ..version import EXCHANGE_2007_SP1, EXCHANGE_2010_SP1
 from .collections import FolderCollection
-from .base import Folder
+from .base import BaseFolder
 from .known_folders import MsgFolderRoot, NON_DELETEABLE_FOLDERS, WELLKNOWN_FOLDERS_IN_ROOT, \
     WELLKNOWN_FOLDERS_IN_ARCHIVE_ROOT
-from .queryset import SingleFolderQuerySet, SHALLOW, DEEP
+from .queryset import SingleFolderQuerySet, SHALLOW
 
 log = logging.getLogger(__name__)
 
 
-class RootOfHierarchy(Folder):
+class RootOfHierarchy(BaseFolder):
+    """Base class for folders that implement the root of a folder hierarchy"""
+
     # A list of wellknown, or "distinguished", folders that are belong in this folder hierarchy. See
-    # http://msdn.microsoft.com/en-us/library/microsoft.exchange.webservices.data.wellknownfoldername(v=exchg.80).aspx
-    # and https://msdn.microsoft.com/en-us/library/office/aa580808(v=exchg.150).aspx
+    # https://docs.microsoft.com/en-us/dotnet/api/microsoft.exchange.webservices.data.wellknownfoldername
+    # and https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/distinguishedfolderid
     # 'RootOfHierarchy' subclasses must not be in this list.
     WELLKNOWN_FOLDERS = []
-    TRAVERSAL_DEPTH = DEEP
 
-    __slots__ = ('account', '_subfolders')
+    LOCAL_FIELDS = [
+        # This folder type also has 'folder:PermissionSet' on some server versions, but requesting it sometimes causes
+        # 'ErrorAccessDenied', as reported by some users. Ignore it entirely for root folders - it's usefulness is
+        # deemed minimal at best.
+        EffectiveRightsField('effective_rights', field_uri='folder:EffectiveRights', is_read_only=True,
+                             supported_from=EXCHANGE_2007_SP1),
+    ]
+    FIELDS = BaseFolder.FIELDS + LOCAL_FIELDS
+    __slots__ = tuple(f.name for f in LOCAL_FIELDS) + ('_account', '_subfolders')
 
     # A special folder that acts as the top of a folder hierarchy. Finds and caches subfolders at arbitrary depth.
     def __init__(self, **kwargs):
-        self.account = kwargs.pop('account', None)  # A pointer back to the account holding the folder hierarchy
-        if kwargs.pop('root', None):
-            raise ValueError("RootOfHierarchy folders do not have a root")
-        kwargs['root'] = self
-        super(RootOfHierarchy, self).__init__(**kwargs)
+        self._account = kwargs.pop('account', None)  # A pointer back to the account holding the folder hierarchy
+        super().__init__(**kwargs)
         self._subfolders = None  # See self._folders_map()
+
+    @property
+    def account(self):
+        return self._account
+
+    @property
+    def root(self):
+        return self
+
+    @property
+    def parent(self):
+        return None
 
     def refresh(self):
         self._subfolders = None
-        super(RootOfHierarchy, self).refresh()
+        super().refresh()
+
+    @classmethod
+    def register(cls, *args, **kwargs):
+        if cls is not RootOfHierarchy:
+            raise TypeError('For folder roots, custom fields must be registered on the RootOfHierarchy class')
+        return super().register(*args, **kwargs)
+
+    @classmethod
+    def deregister(cls, *args, **kwargs):
+        if cls is not RootOfHierarchy:
+            raise TypeError('For folder roots, custom fields must be registered on the RootOfHierarchy class')
+        return super().deregister(*args, **kwargs)
 
     def get_folder(self, folder_id):
         return self._folders_map.get(folder_id, None)
@@ -71,11 +98,7 @@ class RootOfHierarchy(Folder):
                 yield f
 
     @classmethod
-    def get_distinguished(cls, root):
-        raise NotImplementedError('Use get_distinguished_root() instead')
-
-    @classmethod
-    def get_distinguished_root(cls, account):
+    def get_distinguished(cls, account):
         """Gets the distinguished folder for this folder class"""
         if not cls.DISTINGUISHED_FOLDER_ID:
             raise ValueError('Class %s must have a DISTINGUISHED_FOLDER_ID value' % cls)
@@ -145,7 +168,9 @@ class RootOfHierarchy(Folder):
             if isinstance(f, Exception):
                 raise f
             folders_map[f.id] = f
-        for f in SingleFolderQuerySet(account=self.account, folder=self).depth(self.TRAVERSAL_DEPTH).all():
+        for f in SingleFolderQuerySet(account=self.account, folder=self).depth(
+                self.DEFAULT_FOLDER_TRAVERSAL_DEPTH
+        ).all():
             if isinstance(f, ErrorAccessDenied):
                 # We may not have FindFolder access, or GetFolder access, either to this folder or at all
                 continue
@@ -183,8 +208,10 @@ class RootOfHierarchy(Folder):
 
 
 class Root(RootOfHierarchy):
+    """The root of the standard folder hierarchy"""
     DISTINGUISHED_FOLDER_ID = 'root'
     WELLKNOWN_FOLDERS = WELLKNOWN_FOLDERS_IN_ROOT
+    __slots__ = tuple()
 
     @property
     def tois(self):
@@ -194,7 +221,7 @@ class Root(RootOfHierarchy):
 
     def get_default_folder(self, folder_cls):
         try:
-            return super(Root, self).get_default_folder(folder_cls)
+            return super().get_default_folder(folder_cls)
         except ErrorFolderNotFound:
             pass
 
@@ -233,7 +260,7 @@ class Root(RootOfHierarchy):
         if candidates:
             if len(candidates) > 1:
                 raise ValueError(
-                    'Multiple possible default %s folders: %s' % (folder_cls, [text_type(f.name) for f in candidates])
+                    'Multiple possible default %s folders: %s' % (folder_cls, [f.name for f in candidates])
                 )
             if candidates[0].is_distinguished:
                 log.debug('Found cached distinguished %s folder', folder_cls)
@@ -244,16 +271,18 @@ class Root(RootOfHierarchy):
 
 
 class PublicFoldersRoot(RootOfHierarchy):
+    """The root of the public folders hierarchy. Not available on all mailboxes"""
     DISTINGUISHED_FOLDER_ID = 'publicfoldersroot'
-    TRAVERSAL_DEPTH = SHALLOW
+    DEFAULT_FOLDER_TRAVERSAL_DEPTH = SHALLOW
     supported_from = EXCHANGE_2007_SP1
+    __slots__ = tuple()
 
     def get_children(self, folder):
         # EWS does not allow deep traversal of public folders, so self._folders_map will only populate the top-level
         # subfolders. To traverse public folders at arbitrary depth, we need to get child folders on demand.
 
         # Let's check if this folder already has any cached children. If so, assume we can just return those.
-        children = list(super(PublicFoldersRoot, self).get_children(folder=folder))
+        children = list(super().get_children(folder=folder))
         if children:
             # Return a generator like our parent does
             for f in children:
@@ -266,7 +295,9 @@ class PublicFoldersRoot(RootOfHierarchy):
 
         children_map = {}
         try:
-            for f in SingleFolderQuerySet(account=self.account, folder=folder).depth(depth=self.TRAVERSAL_DEPTH).all():
+            for f in SingleFolderQuerySet(account=self.account, folder=folder).depth(
+                    self.DEFAULT_FOLDER_TRAVERSAL_DEPTH
+            ).all():
                 if isinstance(f, Exception):
                     raise f
                 children_map[f.id] = f
@@ -278,11 +309,13 @@ class PublicFoldersRoot(RootOfHierarchy):
         self._subfolders.update(children_map)
 
         # Child folders have been cached now. Try super().get_children() again.
-        for f in super(PublicFoldersRoot, self).get_children(folder=folder):
+        for f in super().get_children(folder=folder):
             yield f
 
 
 class ArchiveRoot(RootOfHierarchy):
+    """The root of the archive folders hierarchy. Not available on all mailboxes"""
     DISTINGUISHED_FOLDER_ID = 'archiveroot'
     supported_from = EXCHANGE_2010_SP1
     WELLKNOWN_FOLDERS = WELLKNOWN_FOLDERS_IN_ARCHIVE_ROOT
+    __slots__ = tuple()

@@ -1,5 +1,3 @@
-from __future__ import unicode_literals
-
 import logging
 
 from cached_property import threaded_cached_property
@@ -10,12 +8,14 @@ from ..properties import CalendarView, InvalidField
 from ..queryset import QuerySet, SearchableMixIn
 from ..restriction import Restriction
 from ..services import FindFolder, GetFolder, FindItem
-from .queryset import SHALLOW, DEEP, FOLDER_TRAVERSAL_CHOICES
+from .queryset import FOLDER_TRAVERSAL_CHOICES
 
 log = logging.getLogger(__name__)
 
 
 class FolderCollection(SearchableMixIn):
+    """A class that implements an API for searching folders"""
+
     # These fields are required in a FindFolder or GetFolder call to properly identify folder types
     REQUIRED_FOLDER_FIELDS = ('name', 'folder_class')
 
@@ -109,18 +109,18 @@ class FolderCollection(SearchableMixIn):
     def supported_item_models(self):
         return tuple(item_model for folder in self.folders for item_model in folder.supported_item_models)
 
-    def validate_item_field(self, field):
+    def validate_item_field(self, field, version):
         # For each field, check if the field is valid for any of the item models supported by this folder
         for item_model in self.supported_item_models:
             try:
-                item_model.validate_field(field=field, version=self.account.version)
+                item_model.validate_field(field=field, version=version)
                 break
             except InvalidField:
                 continue
         else:
             raise InvalidField("%r is not a valid field on %s" % (field, self.supported_item_models))
 
-    def find_items(self, q, shape=ID_ONLY, depth=SHALLOW, additional_fields=None, order_fields=None,
+    def find_items(self, q, shape=ID_ONLY, depth=None, additional_fields=None, order_fields=None,
                    calendar_view=None, page_size=None, max_items=None, offset=0):
         """
         Private method to call the FindItem service
@@ -138,17 +138,19 @@ class FolderCollection(SearchableMixIn):
         :param offset: the offset relative to the first item in the item collection
         :return: a generator for the returned item IDs or items
         """
-        from .base import Folder
-        if shape not in SHAPE_CHOICES:
-            raise ValueError("'shape' %s must be one of %s" % (shape, SHAPE_CHOICES))
-        if depth not in ITEM_TRAVERSAL_CHOICES:
-            raise ValueError("'depth' %s must be one of %s" % (depth, ITEM_TRAVERSAL_CHOICES))
+        from .base import BaseFolder
         if not self.folders:
             log.debug('Folder list is empty')
             return
+        if shape not in SHAPE_CHOICES:
+            raise ValueError("'shape' %s must be one of %s" % (shape, SHAPE_CHOICES))
+        if depth is None:
+            depth = self._get_default_item_traversal_depth()
+        if depth not in ITEM_TRAVERSAL_CHOICES:
+            raise ValueError("'depth' %s must be one of %s" % (depth, ITEM_TRAVERSAL_CHOICES))
         if additional_fields:
             for f in additional_fields:
-                self.validate_item_field(field=f)
+                self.validate_item_field(field=f, version=self.account.version)
                 if f.field.is_complex:
                     raise ValueError("find_items() does not support field '%s'. Use fetch() instead" % f.field.name)
         if calendar_view is not None and not isinstance(calendar_view, CalendarView):
@@ -192,23 +194,51 @@ class FolderCollection(SearchableMixIn):
                 if isinstance(i, Exception):
                     yield i
                 else:
-                    yield Folder.item_model_from_tag(i.tag).from_xml(elem=i, account=self.account)
+                    yield BaseFolder.item_model_from_tag(i.tag).from_xml(elem=i, account=self.account)
 
-    def get_folder_fields(self, is_complex=None):
+    def get_folder_fields(self, target_cls, is_complex=None):
+        return {
+            FieldPath(field=f) for f in target_cls.supported_fields(version=self.account.version)
+            if is_complex is None or f.is_complex is is_complex
+        }
+
+    def _get_target_cls(self):
+        # We may have root folders that don't support the same set of fields as normal folders. If there is a mix of
+        # both folder types in self.folders, raise an error so we don't risk losing some fields in the query.
         from .base import Folder
-        additional_fields = set()
-        for folder in self.folders:
-            if isinstance(folder, Folder):
-                additional_fields.update(
-                    FieldPath(field=f) for f in folder.supported_fields(version=self.account.version)
-                    if is_complex is None or f.is_complex is is_complex
-                )
+        from .roots import RootOfHierarchy
+        has_roots = False
+        has_non_roots = False
+        for f in self.folders:
+            if isinstance(f, RootOfHierarchy):
+                if has_non_roots:
+                    raise ValueError('Cannot call GetFolder on a mix of folder types: {}'.format(self.folders))
+                has_roots = True
             else:
-                additional_fields.update(
-                    FieldPath(field=f) for f in Folder.supported_fields(version=self.account.version)
-                    if is_complex is None or f.is_complex is is_complex
-                )
-        return additional_fields
+                if has_roots:
+                    raise ValueError('Cannot call GetFolder on a mix of folder types: {}'.format(self.folders))
+                has_non_roots = True
+        return RootOfHierarchy if has_roots else Folder
+
+    def _get_default_item_traversal_depth(self):
+        # When searching folders, some folders require 'Shallow' and others 'Associated' traversal depth.
+        unique_depths = set(f.DEFAULT_ITEM_TRAVERSAL_DEPTH for f in self.folders)
+        if len(unique_depths) == 1:
+            return unique_depths.pop()
+        raise ValueError(
+            'Folders in this collection do not have a common DEFAULT_ITEM_TRAVERSAL_DEPTH value. You need to '
+            'define an explicit traversal depth with QuerySet.depth() (values: %s)' % unique_depths
+        )
+
+    def _get_default_folder_traversal_depth(self):
+        # When searching folders, some folders require 'Shallow' and others 'Deep' traversal depth.
+        unique_depths = set(f.DEFAULT_FOLDER_TRAVERSAL_DEPTH for f in self.folders)
+        if len(unique_depths) == 1:
+            return unique_depths.pop()
+        raise ValueError(
+            'Folders in this collection do not have a common DEFAULT_FOLDER_TRAVERSAL_DEPTH value. You need to '
+            'define an explicit traversal depth with FolderQuerySet.depth() (values: %s)' % unique_depths
+        )
 
     def resolve(self):
         # Looks up the folders or folder IDs in the collection and returns full Folder instances with all fields set.
@@ -220,16 +250,19 @@ class FolderCollection(SearchableMixIn):
             else:
                 resolveable_folders.append(f)
         # Fetch all properties for the remaining folders of folder IDs
-        additional_fields = self.get_folder_fields(is_complex=None)
+        additional_fields = self.get_folder_fields(target_cls=self._get_target_cls(), is_complex=None)
         for f in self.__class__(account=self.account, folders=resolveable_folders).get_folders(
                 additional_fields=additional_fields
         ):
             yield f
 
-    def find_folders(self, q=None, shape=ID_ONLY, depth=DEEP, additional_fields=None, page_size=None, max_items=None,
+    def find_folders(self, q=None, shape=ID_ONLY, depth=None, additional_fields=None, page_size=None, max_items=None,
                      offset=0):
         # 'depth' controls whether to return direct children or recurse into sub-folders
-        from .base import Folder
+        from .base import BaseFolder, Folder
+        if not self.folders:
+            log.debug('Folder list is empty')
+            return
         if not self.account:
             raise ValueError('Folder must have an account')
         if q is None or q.is_empty():
@@ -238,14 +271,13 @@ class FolderCollection(SearchableMixIn):
             restriction = Restriction(q, folders=self.folders, applies_to=Restriction.FOLDERS)
         if shape not in SHAPE_CHOICES:
             raise ValueError("'shape' %s must be one of %s" % (shape, SHAPE_CHOICES))
+        if depth is None:
+            depth = self._get_default_folder_traversal_depth()
         if depth not in FOLDER_TRAVERSAL_CHOICES:
             raise ValueError("'depth' %s must be one of %s" % (depth, FOLDER_TRAVERSAL_CHOICES))
-        if not self.folders:
-            log.debug('Folder list is empty')
-            return
         if additional_fields is None:
-            # Default to all non-complex properties
-            additional_fields = self.get_folder_fields(is_complex=False)
+            # Default to all non-complex properties. Subfolders will always be of class Folder
+            additional_fields = self.get_folder_fields(target_cls=Folder, is_complex=False)
         else:
             for f in additional_fields:
                 if f.field.is_complex:
@@ -253,7 +285,7 @@ class FolderCollection(SearchableMixIn):
 
         # Add required fields
         additional_fields.update(
-            (FieldPath(field=Folder.get_field_by_fieldname(f)) for f in self.REQUIRED_FOLDER_FIELDS)
+            (FieldPath(field=BaseFolder.get_field_by_fieldname(f)) for f in self.REQUIRED_FOLDER_FIELDS)
         )
 
         for f in FindFolder(account=self.account, folders=self.folders, chunk_size=page_size).call(
@@ -268,17 +300,17 @@ class FolderCollection(SearchableMixIn):
 
     def get_folders(self, additional_fields=None):
         # Expand folders with their full set of properties
-        from .base import Folder
+        from .base import BaseFolder
         if not self.folders:
             log.debug('Folder list is empty')
             return
         if additional_fields is None:
             # Default to all complex properties
-            additional_fields = self.get_folder_fields(is_complex=True)
+            additional_fields = self.get_folder_fields(target_cls=self._get_target_cls(), is_complex=True)
 
         # Add required fields
         additional_fields.update(
-            (FieldPath(field=Folder.get_field_by_fieldname(f)) for f in self.REQUIRED_FOLDER_FIELDS)
+            (FieldPath(field=BaseFolder.get_field_by_fieldname(f)) for f in self.REQUIRED_FOLDER_FIELDS)
         )
 
         for f in GetFolder(account=self.account).call(

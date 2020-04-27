@@ -8,7 +8,7 @@ log = logging.getLogger(__name__)
 
 class UpdateFolder(EWSAccountService):
     """
-    MSDN: https://msdn.microsoft.com/en-us/library/office/aa580257(v=exchg.150).aspx
+    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/updatefolder-operation
     """
     SERVICE_NAME = 'UpdateFolder'
     element_container_name = '{%s}Folders' % MNS
@@ -23,6 +23,7 @@ class UpdateFolder(EWSAccountService):
     @staticmethod
     def _sort_fieldnames(folder_model, fieldnames):
         # Take a list of fieldnames and return the fields in the order they are mentioned in folder_model.FIELDS.
+        # Loop over FIELDS and not supported_fields(). Upstream should make sure not to update a non-supported field.
         for f in folder_model.FIELDS:
             if f.name in fieldnames:
                 yield f.name
@@ -62,13 +63,13 @@ class UpdateFolder(EWSAccountService):
             yield self._set_folder_elem(folder_model=folder_model, field_path=FieldPath(field=field), value=value)
 
     def get_payload(self, folders):
-        from ..folders import Folder, FolderId, DistinguishedFolderId
+        from ..folders import BaseFolder, FolderId, DistinguishedFolderId
         updatefolder = create_element('m:%s' % self.SERVICE_NAME)
         folderchanges = create_element('m:FolderChanges')
         for folder, fieldnames in folders:
             log.debug('Updating folder %s', folder)
             folderchange = create_element('t:FolderChange')
-            if not isinstance(folder, (Folder, FolderId, DistinguishedFolderId)):
+            if not isinstance(folder, (BaseFolder, FolderId, DistinguishedFolderId)):
                 folder = to_item_id(folder, FolderId)
             set_xml_value(folderchange, folder, version=self.account.version)
             updates = create_element('t:Updates')

@@ -1,12 +1,8 @@
-# coding=utf-8
-from __future__ import unicode_literals
-
 from copy import deepcopy
 from itertools import islice
 import logging
 
-from future.utils import python_2_unicode_compatible
-
+from .errors import MultipleObjectsReturned, DoesNotExist
 from .items import CalendarItem, ID_ONLY
 from .fields import FieldPath, FieldOrder
 from .properties import InvalidField
@@ -17,16 +13,8 @@ from .version import EXCHANGE_2010
 log = logging.getLogger(__name__)
 
 
-class MultipleObjectsReturned(Exception):
-    pass
-
-
-class DoesNotExist(Exception):
-    pass
-
-
-class SearchableMixIn(object):
-    # Implements a search API for inheritance
+class SearchableMixIn:
+    """Implements a search API for inheritance"""
     def get(self, *args, **kwargs):
         raise NotImplementedError()
 
@@ -46,7 +34,6 @@ class SearchableMixIn(object):
         raise NotImplementedError()
 
 
-@python_2_unicode_compatible
 class QuerySet(SearchableMixIn):
     """
     A Django QuerySet-like class for querying items. Defers queries until the QuerySet is consumed. Supports chaining to
@@ -80,10 +67,11 @@ class QuerySet(SearchableMixIn):
         self.page_size = None
         self.max_items = None
         self.offset = 0
+        self._depth = None
 
         self._cache = None
 
-    def copy(self):
+    def _copy_self(self):
         # When we copy a queryset where the cache has already been filled, we don't copy the cache. Thus, a copied
         # queryset will fetch results from the server again.
         #
@@ -111,6 +99,7 @@ class QuerySet(SearchableMixIn):
         new_qs.page_size = self.page_size
         new_qs.max_items = self.max_items
         new_qs.offset = self.offset
+        new_qs._depth = self._depth
         return new_qs
 
     @property
@@ -181,7 +170,6 @@ class QuerySet(SearchableMixIn):
         }[return_format](items)
 
     def _query(self):
-        from .folders import SHALLOW
         from .items import Persona
         if self.only_fields is None:
             # We didn't restrict list of field paths. Get all fields from the server, including extended properties.
@@ -220,7 +208,7 @@ class QuerySet(SearchableMixIn):
             items = list(self.folder_collection)[0].find_people(
                 self.q,
                 shape=ID_ONLY,
-                depth=SHALLOW,
+                depth=self._depth,
                 additional_fields=additional_fields,
                 order_fields=order_fields,
                 page_size=self.page_size,
@@ -230,6 +218,7 @@ class QuerySet(SearchableMixIn):
         else:
             find_item_kwargs = dict(
                 shape=ID_ONLY,  # Always use IdOnly here, because AllProperties doesn't actually get *all* properties
+                depth=self._depth,
                 additional_fields=additional_fields,
                 order_fields=order_fields,
                 calendar_view=self.calendar_view,
@@ -320,7 +309,7 @@ class QuerySet(SearchableMixIn):
             reverse_idx = -(idx+1)
             return self.reverse()[reverse_idx]
         # Optimize by setting an exact offset and fetching only 1 item
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         new_qs.max_items = 1
         new_qs.page_size = 1
         new_qs.offset = idx
@@ -338,7 +327,7 @@ class QuerySet(SearchableMixIn):
         if self.is_cached:
             return islice(self.__iter__(), s.start, s.stop, s.step)
         # Optimize by setting an exact offset and max_items value
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         if s.start is not None and s.stop is not None:
             new_qs.offset = s.start
             new_qs.max_items = s.stop - s.start
@@ -434,32 +423,32 @@ class QuerySet(SearchableMixIn):
     #
     def all(self):
         """ Return everything, without restrictions """
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         return new_qs
 
     def none(self):
         """ Return a query that is guaranteed to be empty  """
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         new_qs.q = None
         return new_qs
 
     def filter(self, *args, **kwargs):
         """ Return everything that matches these search criteria """
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         q = Q(*args, **kwargs)
         new_qs.q = q if new_qs.q is None else new_qs.q & q
         return new_qs
 
     def exclude(self, *args, **kwargs):
         """ Return everything that does NOT match these search criteria """
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         q = ~Q(*args, **kwargs)
         new_qs.q = q if new_qs.q is None else new_qs.q & q
         return new_qs
 
     def people(self):
         """ Changes the queryset to search the folder for Personas instead of Items """
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         new_qs.request_type = self.PERSONA
         return new_qs
 
@@ -469,7 +458,7 @@ class QuerySet(SearchableMixIn):
             only_fields = tuple(self._get_field_path(arg) for arg in args)
         except ValueError as e:
             raise ValueError("%s in only()" % e.args[0])
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         new_qs.only_fields = only_fields
         return new_qs
 
@@ -481,7 +470,7 @@ class QuerySet(SearchableMixIn):
             order_fields = tuple(self._get_field_order(arg) for arg in args)
         except ValueError as e:
             raise ValueError("%s in order_by()" % e.args[0])
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         new_qs.order_fields = order_fields
         return new_qs
 
@@ -489,7 +478,7 @@ class QuerySet(SearchableMixIn):
         """ Return the entire query result in reverse order """
         if not self.order_fields:
             raise ValueError('Reversing only makes sense if there are order_by fields')
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         for f in new_qs.order_fields:
             f.reverse = not f.reverse
         return new_qs
@@ -500,7 +489,7 @@ class QuerySet(SearchableMixIn):
             only_fields = tuple(self._get_field_path(arg) for arg in args)
         except ValueError as e:
             raise ValueError("%s in values()" % e.args[0])
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         new_qs.only_fields = only_fields
         new_qs.return_format = self.VALUES
         return new_qs
@@ -519,9 +508,16 @@ class QuerySet(SearchableMixIn):
             only_fields = tuple(self._get_field_path(arg) for arg in args)
         except ValueError as e:
             raise ValueError("%s in values_list()" % e.args[0])
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         new_qs.only_fields = only_fields
         new_qs.return_format = self.FLAT if flat else self.VALUES_LIST
+        return new_qs
+
+    def depth(self, depth):
+        """Specify the search depth (SHALLOW, ASSOCIATED or DEEP)
+        """
+        new_qs = self._copy_self()
+        new_qs._depth = depth
         return new_qs
 
     ###########################
@@ -529,6 +525,7 @@ class QuerySet(SearchableMixIn):
     # Methods that end chaining
     #
     ###########################
+
     def iterator(self):
         """ Return the query result as an iterator, without caching the result """
         if self.q is None:
@@ -564,7 +561,7 @@ class QuerySet(SearchableMixIn):
         fetch from the server per request. We're only fetching the IDs, so keep it high"""
         if self.is_cached:
             return len(self._cache)
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         new_qs.only_fields = tuple()
         new_qs.order_fields = None
         new_qs.return_format = self.NONE
@@ -575,32 +572,97 @@ class QuerySet(SearchableMixIn):
         """ Find out if the query contains any hits, with as little effort as possible """
         if self.is_cached:
             return len(self._cache) > 0
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         new_qs.max_items = 1
         return new_qs.count(page_size=1) > 0
 
-    def delete(self, page_size=1000):
-        """ Delete the items matching the query, with as little effort as possible. 'page_size' is the number of items
-        to fetch and delete from the server per request. We're only fetching the IDs, so keep it high"""
-        from .items import ALL_OCCURRENCIES
-        if self.is_cached:
-            res = self.folder_collection.account.bulk_delete(
-                ids=self._cache,
-                affected_task_occurrences=ALL_OCCURRENCIES,
-                chunk_size=page_size,
-            )
-            self._cache = None  # Invalidate the cache after delete, regardless of the results
-            return res
-        new_qs = self.copy()
+    def _id_only_copy_self(self):
+        new_qs = self._copy_self()
         new_qs.only_fields = tuple()
         new_qs.order_fields = None
         new_qs.return_format = self.NONE
-        new_qs.page_size = page_size
-        return self.folder_collection.account.bulk_delete(
-            ids=new_qs,
-            affected_task_occurrences=ALL_OCCURRENCIES,
+        return new_qs
+
+    def delete(self, page_size=1000, **delete_kwargs):
+        """ Delete the items matching the query, with as little effort as possible. 'page_size' is the number of items
+        to fetch and delete per request. We're only fetching the IDs, so keep it high"""
+        if self.is_cached:
+            ids = self._cache
+        else:
+            ids = self._id_only_copy_self()
+            ids.page_size = page_size
+        res = self.folder_collection.account.bulk_delete(
+            ids=ids,
+            chunk_size=page_size,
+            **delete_kwargs
+        )
+        self._cache = None  # Invalidate the cache, regardless of the results
+        return res
+
+    def send(self, page_size=1000, **send_kwargs):
+        """ Send the items matching the query, with as little effort as possible. 'page_size' is the number of items
+        to fetch and send per request. We're only fetching the IDs, so keep it high"""
+        if self.is_cached:
+            ids = self._cache
+        else:
+            ids = self._id_only_copy_self()
+            ids.page_size = page_size
+        res = self.folder_collection.account.bulk_send(
+            ids=ids,
+            chunk_size=page_size,
+            **send_kwargs
+        )
+        self._cache = None  # Invalidate the cache, regardless of the results
+        return res
+
+    def copy(self, to_folder, page_size=1000, **copy_kwargs):
+        """ Copy the items matching the query, with as little effort as possible. 'page_size' is the number of items
+        to fetch and copy per request. We're only fetching the IDs, so keep it high"""
+        if self.is_cached:
+            ids = self._cache
+        else:
+            ids = self._id_only_copy_self()
+            ids.page_size = page_size
+        res = self.folder_collection.account.bulk_copy(
+            ids=ids,
+            to_folder=to_folder,
+            chunk_size=page_size,
+            **copy_kwargs
+        )
+        self._cache = None  # Invalidate the cache, regardless of the results
+        return res
+
+    def move(self, to_folder, page_size=1000):
+        """ Move the items matching the query, with as little effort as possible. 'page_size' is the number of items
+        to fetch and move per request. We're only fetching the IDs, so keep it high"""
+        if self.is_cached:
+            ids = self._cache
+        else:
+            ids = self._id_only_copy_self()
+            ids.page_size = page_size
+        res = self.folder_collection.account.bulk_move(
+            ids=ids,
+            to_folder=to_folder,
             chunk_size=page_size,
         )
+        self._cache = None  # Invalidate the cache after delete, regardless of the results
+        return res
+
+    def archive(self, to_folder, page_size=1000):
+        """ Archive the items matching the query, with as little effort as possible. 'page_size' is the number of items
+        to fetch and move per request. We're only fetching the IDs, so keep it high"""
+        if self.is_cached:
+            ids = self._cache
+        else:
+            ids = self._id_only_copy_self()
+            ids.page_size = page_size
+        res = self.folder_collection.account.bulk_archive(
+            ids=ids,
+            to_folder=to_folder,
+            chunk_size=page_size,
+        )
+        self._cache = None  # Invalidate the cache after delete, regardless of the results
+        return res
 
     def __str__(self):
         fmt_args = [('q', str(self.q)), ('folders', '[%s]' % ', '.join(str(f) for f in self.folder_collection.folders))]

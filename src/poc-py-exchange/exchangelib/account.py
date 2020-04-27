@@ -1,12 +1,7 @@
-# coding=utf-8
-from __future__ import unicode_literals
-
 from locale import getlocale
 from logging import getLogger
 
 from cached_property import threaded_cached_property
-from future.utils import python_2_unicode_compatible
-from six import string_types
 
 from .autodiscover import discover
 from .configuration import Configuration
@@ -20,24 +15,24 @@ from .folders import Folder, AdminAuditLogs, ArchiveDeletedItems, ArchiveInbox, 
     Directory, Drafts, Favorites, IMContactList, Inbox, Journal, JunkEmail, LocalFailures, MsgFolderRoot, MyContacts, \
     Notes, Outbox, PeopleConnect, PublicFoldersRoot, QuickContacts, RecipientCache, RecoverableItemsDeletions, \
     RecoverableItemsPurges, RecoverableItemsRoot, RecoverableItemsVersions, Root, SearchFolders, SentItems, \
-    ServerFailures, SyncIssues, Tasks, ToDoSearch, VoiceMail
+    ServerFailures, SyncIssues, Tasks, ToDoSearch, VoiceMail, BaseFolder
 from .items import Item, BulkCreateResult, HARD_DELETE, \
     AUTO_RESOLVE, SEND_TO_NONE, SAVE_ONLY, SEND_AND_SAVE_COPY, SEND_ONLY, ALL_OCCURRENCIES, \
     DELETE_TYPE_CHOICES, MESSAGE_DISPOSITION_CHOICES, CONFLICT_RESOLUTION_CHOICES, AFFECTED_TASK_OCCURRENCES_CHOICES, \
     SEND_MEETING_INVITATIONS_CHOICES, SEND_MEETING_INVITATIONS_AND_CANCELLATIONS_CHOICES, \
     SEND_MEETING_CANCELLATIONS_CHOICES, ID_ONLY
-from .properties import Mailbox
+from .properties import Mailbox, SendingAs, FolderId, DistinguishedFolderId
+from .protocol import Protocol
 from .queryset import QuerySet
 from .services import ExportItems, UploadItems, GetItem, CreateItem, UpdateItem, DeleteItem, MoveItem, SendItem, \
-    CopyItem, GetUserOofSettings, SetUserOofSettings
+    CopyItem, GetUserOofSettings, SetUserOofSettings, GetMailTips, ArchiveItem, GetDelegate
 from .settings import OofSettings
 from .util import get_domain, peek
 
 log = getLogger(__name__)
 
 
-@python_2_unicode_compatible
-class Account(object):
+class Account:
     """Models an Exchange server user account. The primary key for an account is its PrimarySMTPAddress
     """
     def __init__(self, primary_smtp_address, fullname=None, access_type=None, autodiscover=False, credentials=None,
@@ -56,7 +51,6 @@ class Account(object):
         """
         if '@' not in primary_smtp_address:
             raise ValueError("primary_smtp_address %r is not an email address" % primary_smtp_address)
-        self.primary_smtp_address = primary_smtp_address
         self.fullname = fullname
         # Assume delegate access if individual credentials are provided. Else, assume service user with impersonation
         self.access_type = access_type or (DELEGATE if credentials else IMPERSONATION)
@@ -68,9 +62,8 @@ class Account(object):
             # getlocale() may throw ValueError if it fails to parse the system locale
             log.warning('Failed to get locale (%s)' % e)
             self.locale = None
-        if self.locale is not None:
-            if not isinstance(self.locale, string_types):
-                raise ValueError("Expected 'locale' to be a string, got %r" % self.locale)
+        if not isinstance(self.locale, (type(None), str)):
+            raise ValueError("Expected 'locale' to be a string, got %r" % self.locale)
         try:
             self.default_timezone = default_timezone or EWSTimeZone.localzone()
         except (ValueError, UnknownTimeZone) as e:
@@ -80,19 +73,25 @@ class Account(object):
             self.default_timezone = UTC
         if not isinstance(self.default_timezone, EWSTimeZone):
             raise ValueError("Expected 'default_timezone' to be an EWSTimeZone, got %r" % self.default_timezone)
+        if not isinstance(config, (Configuration, type(None))):
+            raise ValueError("Expected 'config' to be a Configuration, got %r" % config)
         if autodiscover:
-            if not credentials:
-                raise AttributeError('autodiscover requires credentials')
             if config:
-                raise AttributeError('config is ignored when autodiscover is active')
-            self.primary_smtp_address, self.protocol = discover(email=self.primary_smtp_address,
-                                                                credentials=credentials)
+                retry_policy, auth_type = config.retry_policy, config.auth_type
+                if not credentials:
+                    credentials = config.credentials
+            else:
+                retry_policy, auth_type = None, None
+            self.ad_response, self.protocol = discover(
+                email=primary_smtp_address, credentials=credentials, auth_type=auth_type, retry_policy=retry_policy
+            )
+            self.primary_smtp_address = self.ad_response.autodiscover_smtp_address
         else:
             if not config:
                 raise AttributeError('non-autodiscover requires a config')
-            if not isinstance(config, Configuration):
-                raise ValueError("Expected 'config' to be a Configuration, got %r" % config)
-            self.protocol = config.protocol
+            self.primary_smtp_address = primary_smtp_address
+            self.ad_response = None
+            self.protocol = Protocol(config=config)
         # We may need to override the default server version on a per-account basis because Microsoft may report one
         # server version up-front but delegate account requests to an older backend server.
         self.version = self.protocol.version
@@ -132,7 +131,7 @@ class Account(object):
 
     @threaded_cached_property
     def archive_root(self):
-        return ArchiveRoot.get_distinguished_root(account=self)
+        return ArchiveRoot.get_distinguished(account=self)
 
     @threaded_cached_property
     def calendar(self):
@@ -208,7 +207,7 @@ class Account(object):
 
     @threaded_cached_property
     def public_folders_root(self):
-        return PublicFoldersRoot.get_distinguished_root(account=self)
+        return PublicFoldersRoot.get_distinguished(account=self)
 
     @threaded_cached_property
     def quick_contacts(self):
@@ -236,7 +235,7 @@ class Account(object):
 
     @threaded_cached_property
     def root(self):
-        return Root.get_distinguished_root(account=self)
+        return Root.get_distinguished(account=self)
 
     @threaded_cached_property
     def search_folders(self):
@@ -366,9 +365,9 @@ class Account(object):
                 send_meeting_invitations, SEND_MEETING_INVITATIONS_CHOICES
             ))
         if folder is not None:
-            if not isinstance(folder, Folder):
+            if not isinstance(folder, BaseFolder):
                 raise ValueError("'folder' %r must be a Folder instance" % folder)
-            if not folder.root or folder.root.account != self:
+            if folder.account != self:
                 raise ValueError('"Folder must belong to this account')
         if message_disposition == SAVE_ONLY and folder is None:
             raise AttributeError("Folder must be supplied when in save-only mode")
@@ -511,6 +510,8 @@ class Account(object):
             raise AttributeError("'save_copy' must be True when 'copy_to_folder' is set")
         if save_copy and not copy_to_folder:
             copy_to_folder = self.sent  # 'Sent' is default EWS behaviour
+        if copy_to_folder and not isinstance(copy_to_folder, BaseFolder):
+            raise ValueError("'copy_to_folder' %r must be a Folder instance" % copy_to_folder)
         return list(
             self._consume_item_service(service_cls=SendItem, items=ids, chunk_size=chunk_size, kwargs=dict(
                 saved_item_folder=copy_to_folder,
@@ -525,7 +526,7 @@ class Account(object):
         :param chunk_size: The number of items to send to the server in a single request
         :return: Status for each send operation, in the same order as the input
         """
-        if not isinstance(to_folder, Folder):
+        if not isinstance(to_folder, BaseFolder):
             raise ValueError("'to_folder' %r must be a Folder instance" % to_folder)
         return list(
             i if isinstance(i, Exception) else Item.id_from_xml(i)
@@ -543,11 +544,27 @@ class Account(object):
         :return: The new IDs of the moved items, in the same order as the input. If 'to_folder' is a public folder or a
         folder in a different mailbox, an empty list is returned.
         """
-        if not isinstance(to_folder, Folder):
+        if not isinstance(to_folder, BaseFolder):
             raise ValueError("'to_folder' %r must be a Folder instance" % to_folder)
         return list(
             i if isinstance(i, Exception) else Item.id_from_xml(i)
             for i in self._consume_item_service(service_cls=MoveItem, items=ids, chunk_size=chunk_size, kwargs=dict(
+                to_folder=to_folder,
+            ))
+        )
+
+    def bulk_archive(self, ids, to_folder, chunk_size=None):
+        """Archive items to a folder in the archive mailbox. An archive mailbox must be enabled in order for this
+        to work.
+
+        :param ids: an iterable of either (id, changekey) tuples or Item objects.
+        :param to_folder: The destination folder of the archive operation
+        :param chunk_size: The number of items to send to the server in a single request
+        :return: A list containing True or an exception instance in stable order of the requested items
+        """
+        if not isinstance(to_folder, (BaseFolder, FolderId, DistinguishedFolderId)):
+            raise ValueError("'to_folder' %r must be a Folder or FolderId instance" % to_folder)
+        return list(self._consume_item_service(service_cls=ArchiveItem, items=ids, chunk_size=chunk_size, kwargs=dict(
                 to_folder=to_folder,
             ))
         )
@@ -572,7 +589,7 @@ class Account(object):
             }
         else:
             for field in only_fields:
-                validation_folder.validate_item_field(field=field)
+                validation_folder.validate_item_field(field=field, version=self.version)
             additional_fields = validation_folder.normalize_fields(fields=only_fields)
         # Always use IdOnly here, because AllProperties doesn't actually get *all* properties
         for i in self._consume_item_service(service_cls=GetItem, items=ids, chunk_size=chunk_size, kwargs=dict(
@@ -584,6 +601,28 @@ class Account(object):
             else:
                 item = validation_folder.item_model_from_tag(i.tag).from_xml(elem=i, account=self)
                 yield item
+
+    @property
+    def mail_tips(self):
+        """See self.oof_settings about caching considerations
+        """
+        # mail_tips_requested must be one of properties.MAIL_TIPS_TYPES
+        res = list(GetMailTips(protocol=self.protocol).call(
+            sending_as=SendingAs(email_address=self.primary_smtp_address),
+            recipients=[Mailbox(email_address=self.primary_smtp_address)],
+            mail_tips_requested='All',
+        ))
+        if len(res) != 1:
+            raise ValueError('Expected result length 1, but got %s' % res)
+        if isinstance(res[0], Exception):
+            raise res[0]
+        return res[0]
+
+    @property
+    def delegates(self):
+        """Returns a list of DelegateUser objects representing the delegates that are set on this account
+        """
+        return list(GetDelegate(account=self).call(user_ids=None, include_permissions=True))
 
     def __str__(self):
         txt = '%s' % self.primary_smtp_address

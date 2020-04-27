@@ -1,25 +1,29 @@
-# coding=utf-8
 # flake8: noqa
 """
 Stores errors specific to this package, and mirrors all the possible errors that EWS can return.
 """
-from __future__ import unicode_literals
+from urllib.parse import urlparse
 
-from future.moves.urllib.parse import urlparse
-from future.utils import python_2_unicode_compatible
-from six import text_type
+import pytz.exceptions
 
 
-@python_2_unicode_compatible
+class MultipleObjectsReturned(Exception):
+    pass
+
+
+class DoesNotExist(Exception):
+    pass
+
+
 class EWSError(Exception):
     """Global error type within this module.
     """
     def __init__(self, value):
-        super(EWSError, self).__init__(value)
+        super().__init__(value)
         self.value = value
 
     def __str__(self):
-        return text_type(self.value)
+        return str(self.value)
 
 
 # Warnings
@@ -34,14 +38,14 @@ class TransportError(EWSError):
 
 class RateLimitError(TransportError):
     def __init__(self, value, url, status_code, total_wait):
-        super(RateLimitError, self).__init__(value)
+        super().__init__(value)
         self.url = url
         self.status_code = status_code
         self.total_wait = total_wait
 
     def __str__(self):
-        return text_type(
-            '{value} (gave up after {total_wait} seconds. URL {url} returned status code {status_code})'.format(
+        return str(
+            '{value} (gave up after {total_wait:.3f} seconds. URL {url} returned status code {status_code})'.format(
                 value=self.value, url=self.url, status_code=self.status_code, total_wait=self.total_wait)
         )
 
@@ -58,14 +62,13 @@ class UnauthorizedError(EWSError):
     pass
 
 
-@python_2_unicode_compatible
 class RedirectError(TransportError):
     def __init__(self, url):
         parsed_url = urlparse(url)
         self.url = url
         self.server = parsed_url.hostname.lower()
         self.has_ssl = parsed_url.scheme == 'https'
-        super(RedirectError, self).__init__(text_type(self))
+        super().__init__(str(self))
 
     def __str__(self):
         return 'We were redirected to %s' % self.url
@@ -87,11 +90,10 @@ class AutoDiscoverCircularRedirect(AutoDiscoverError):
     pass
 
 
-@python_2_unicode_compatible
 class AutoDiscoverRedirect(AutoDiscoverError):
     def __init__(self, redirect_email):
         self.redirect_email = redirect_email
-        super(AutoDiscoverRedirect, self).__init__(text_type(self))
+        super().__init__(str(self))
 
     def __str__(self):
         return 'AutoDiscover redirects to %s' % self.redirect_email
@@ -105,11 +107,11 @@ class UnknownTimeZone(EWSError):
     pass
 
 
-class AmbiguousTimeError(EWSError):
+class AmbiguousTimeError(EWSError, pytz.exceptions.AmbiguousTimeError):
     pass
 
 
-class NonExistentTimeError(EWSError):
+class NonExistentTimeError(EWSError, pytz.exceptions.NonExistentTimeError):
     pass
 
 
@@ -121,21 +123,21 @@ class ResponseMessageError(TransportError):
     pass
 
 
-@python_2_unicode_compatible
 class CASError(EWSError):
-    # EWS will sometimes return an error message in an 'X-CasErrorCode' custom HTTP header in an HTTP 500 error code.
-    # This exception is for those cases. The caller may want to do something with the original response, so store that.
+    """EWS will sometimes return an error message in an 'X-CasErrorCode' custom HTTP header in an HTTP 500 error code.
+    This exception is for those cases. The caller may want to do something with the original response, so store that.
+    """
     def __init__(self, cas_error, response):
         self.cas_error = cas_error
         self.response = response
-        super(CASError, self).__init__(text_type(self))
+        super().__init__(str(self))
 
     def __str__(self):
         return 'CAS error: %s' % self.cas_error
 
 
 # Somewhat-authoritative list of possible response message error types from EWS. See full list at
-# https://msdn.microsoft.com/en-us/library/office/aa580757(v=exchg.150).aspx
+# https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/responsecode
 #
 class ErrorAccessDenied(ResponseMessageError): pass
 class ErrorAccessModeSpecified(ResponseMessageError): pass
@@ -479,7 +481,7 @@ class ErrorSentTaskRequestUpdate(ResponseMessageError): pass
 class ErrorServerBusy(ResponseMessageError):
     def __init__(self, *args, **kwargs):
         self.back_off = kwargs.pop('back_off', None)  # Requested back off value in seconds
-        super(ErrorServerBusy, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
 
 class ErrorServiceDiscoveryFailed(ResponseMessageError): pass

@@ -14,7 +14,7 @@ FOLDER_TRAVERSAL_CHOICES = (SHALLOW, DEEP, SOFT_DELETED)
 log = logging.getLogger(__name__)
 
 
-class FolderQuerySet(object):
+class FolderQuerySet:
     """A QuerySet-like class for finding subfolders of a folder collection
     """
     def __init__(self, folder_collection):
@@ -23,25 +23,27 @@ class FolderQuerySet(object):
             raise ValueError("'folder_collection' %r must be a FolderCollection instance" % folder_collection)
         self.folder_collection = folder_collection
         self.only_fields = None
-        self.traversal_depth = None
+        self._depth = None
         self.q = None
 
     def _copy_cls(self):
         return self.__class__(folder_collection=self.folder_collection)
 
-    def copy(self):
+    def _copy_self(self):
         """Chaining operations must make a copy of self before making any modifications
         """
         new_qs = self._copy_cls()
         new_qs.only_fields = self.only_fields
-        new_qs.traversal_depth = self.traversal_depth
+        new_qs._depth = self._depth
         new_qs.q = None if self.q is None else deepcopy(self.q)
         return new_qs
 
     def only(self, *args):
         """Restrict the fields returned. 'name' and 'folder_class' are always returned.
         """
-        all_fields = self.folder_collection.get_folder_fields(is_complex=None)
+        from .base import Folder
+        # Subfolders will always be of class Folder
+        all_fields = self.folder_collection.get_folder_fields(target_cls=Folder, is_complex=None)
         only_fields = []
         for arg in args:
             for field_path in all_fields:
@@ -50,17 +52,15 @@ class FolderQuerySet(object):
                     break
             else:
                 raise InvalidField("Unknown field %r on folders %s" % (arg, self.folder_collection.folders))
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         new_qs.only_fields = only_fields
         return new_qs
 
     def depth(self, depth):
         """Specify the search depth (SHALLOW or DEEP)
         """
-        if depth not in FOLDER_TRAVERSAL_CHOICES:
-            raise ValueError("'depth' %s must be one of %s" % (depth, FOLDER_TRAVERSAL_CHOICES))
-        new_qs = self.copy()
-        new_qs.traversal_depth = depth
+        new_qs = self._copy_self()
+        new_qs._depth = depth
         return new_qs
 
     def get(self, *args, **kwargs):
@@ -82,13 +82,13 @@ class FolderQuerySet(object):
     def all(self):
         """Return all child folders at the depth specified
         """
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         return new_qs
 
     def filter(self, *args, **kwargs):
         """Add restrictions to the folder search
         """
-        new_qs = self.copy()
+        new_qs = self._copy_self()
         q = Q(*args, **kwargs)
         new_qs.q = q if new_qs.q is None else new_qs.q & q
         return new_qs
@@ -97,21 +97,19 @@ class FolderQuerySet(object):
         return self._query()
 
     def _query(self):
+        from .base import Folder
         from .collections import FolderCollection
-        if self.traversal_depth is None:
-            self.traversal_depth = DEEP
         if self.only_fields is None:
-            non_complex_fields = self.folder_collection.get_folder_fields(is_complex=False)
-            complex_fields = self.folder_collection.get_folder_fields(is_complex=True)
+            # Subfolders will always be of class Folder
+            non_complex_fields = self.folder_collection.get_folder_fields(target_cls=Folder, is_complex=False)
+            complex_fields = self.folder_collection.get_folder_fields(target_cls=Folder, is_complex=True)
         else:
             non_complex_fields = set(f for f in self.only_fields if not f.field.is_complex)
             complex_fields = set(f for f in self.only_fields if f.field.is_complex)
 
         # First, fetch all non-complex fields using FindFolder. We do this because some folders do not support
         # GetFolder but we still want to get as much information as possible.
-        folders = self.folder_collection.find_folders(
-            q=self.q, depth=self.traversal_depth, additional_fields=non_complex_fields
-        )
+        folders = self.folder_collection.find_folders(q=self.q, depth=self._depth, additional_fields=non_complex_fields)
         if not complex_fields:
             for f in folders:
                 yield f
@@ -152,7 +150,7 @@ class SingleFolderQuerySet(FolderQuerySet):
     def __init__(self, account, folder):
         from .collections import FolderCollection
         folder_collection = FolderCollection(account=account, folders=[folder])
-        super(SingleFolderQuerySet, self).__init__(folder_collection=folder_collection)
+        super().__init__(folder_collection=folder_collection)
 
     def _copy_cls(self):
         return self.__class__(account=self.folder_collection.account, folder=self.folder_collection.folders[0])

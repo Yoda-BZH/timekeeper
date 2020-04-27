@@ -1,14 +1,14 @@
-# coding=utf-8
-from __future__ import unicode_literals
-
 import logging
+import time
 
 import requests.auth
 import requests_ntlm
+import requests_oauthlib
 
 from .credentials import IMPERSONATION
-from .errors import UnauthorizedError, TransportError, RedirectError, RelativeRedirect
-from .util import create_element, add_xml_child, get_redirect_url, xml_to_str, ns_translation, CONNECTION_ERRORS
+from .errors import UnauthorizedError, TransportError
+from .util import create_element, add_xml_child, xml_to_str, ns_translation, _may_retry_on_error, _back_off_if_needed, \
+    DummyResponse, CONNECTION_ERRORS
 
 log = logging.getLogger(__name__)
 
@@ -18,11 +18,14 @@ NTLM = 'NTLM'
 BASIC = 'basic'
 DIGEST = 'digest'
 GSSAPI = 'gssapi'
+SSPI = 'sspi'
+OAUTH2 = 'OAuth 2.0'
 
 AUTH_TYPE_MAP = {
     NTLM: requests_ntlm.HttpNtlmAuth,
     BASIC: requests.auth.HTTPBasicAuth,
     DIGEST: requests.auth.HTTPDigestAuth,
+    OAUTH2: requests_oauthlib.OAuth2,
     NOAUTH: None,
 }
 try:
@@ -31,29 +34,35 @@ try:
 except ImportError:
     # Kerberos auth is optional
     pass
+try:
+    import requests_negotiate_sspi
+    AUTH_TYPE_MAP[SSPI] = requests_negotiate_sspi.HttpNegotiateAuth
+except ImportError:
+    # SSPI auth is optional
+    pass
 
 DEFAULT_ENCODING = 'utf-8'
 DEFAULT_HEADERS = {'Content-Type': 'text/xml; charset=%s' % DEFAULT_ENCODING, 'Accept-Encoding': 'gzip, deflate'}
 
 
 def extra_headers(account):
+    """Generate extra HTTP headers
     """
-    Generate extra headers for impersonation requests. See
-    https://blogs.msdn.microsoft.com/webdav_101/2015/05/11/best-practices-ews-authentication-and-access-issues/
-    """
-    if account and account.access_type == IMPERSONATION:
+    if account:
+        # See
+        # https://blogs.msdn.microsoft.com/webdav_101/2015/05/11/best-practices-ews-authentication-and-access-issues/
         return {'X-AnchorMailbox': account.primary_smtp_address}
     return None
 
 
-def wrap(content, version, account=None):
+def wrap(content, api_version, account=None):
     """
     Generate the necessary boilerplate XML for a raw SOAP request. The XML is specific to the server version.
     ExchangeImpersonation allows to act as the user we want to impersonate.
     """
     envelope = create_element('s:Envelope', nsmap=ns_translation)
     header = create_element('s:Header')
-    requestserverversion = create_element('t:RequestServerVersion', attrs=dict(Version=version))
+    requestserverversion = create_element('t:RequestServerVersion', attrs=dict(Version=api_version))
     header.append(requestserverversion)
     if account:
         if account.access_type == IMPERSONATION:
@@ -73,104 +82,74 @@ def wrap(content, version, account=None):
     return xml_to_str(envelope, encoding=DEFAULT_ENCODING, xml_declaration=True)
 
 
-def get_auth_instance(credentials, auth_type):
+def get_auth_instance(auth_type, **kwargs):
     """
     Returns an *Auth instance suitable for the requests package
     """
     model = AUTH_TYPE_MAP[auth_type]
     if model is None:
         return None
-    username = credentials.username
-    if auth_type == NTLM and credentials.type == credentials.EMAIL:
-        username = '\\' + username
     if auth_type == GSSAPI:
         # Kerberos auth relies on credentials supplied via a ticket available externally to this library
         return model()
-    return model(username=username, password=credentials.password)
+    if auth_type == SSPI:
+        # SSPI auth does not require credentials, but can have it
+        return model(**kwargs)
+    return model(**kwargs)
 
 
-def get_autodiscover_authtype(service_endpoint, data):
-    # First issue a HEAD request to look for a location header. This is the autodiscover HTTP redirect method. If there
-    # was no redirect, continue trying a POST request with a valid payload.
-    log.debug('Getting autodiscover auth type for %s', service_endpoint)
-    from .autodiscover import AutodiscoverProtocol
-    with AutodiscoverProtocol.raw_session() as s:
-        try:
-            r = s.head(url=service_endpoint, headers=DEFAULT_HEADERS.copy(), allow_redirects=False,
-                       timeout=AutodiscoverProtocol.TIMEOUT)
-        except CONNECTION_ERRORS as e:
-            raise TransportError(str(e))
-        if r.status_code in (301, 302):
-            try:
-                redirect_url = get_redirect_url(r, require_relative=True)
-                log.debug('Autodiscover HTTP redirect to %s', redirect_url)
-            except RelativeRedirect as e:
-                # We were redirected to a different domain or sheme. Raise RedirectError so higher-level code can
-                # try again on this new domain or scheme.
-                raise RedirectError(url=e.value)
-            # Some MS servers are masters of messing up HTTP, issuing 302 to an error page with zero content.
-            # Give this URL a chance with a POST request.
-        try:
-            r = s.post(url=service_endpoint, headers=DEFAULT_HEADERS.copy(), data=data, allow_redirects=False,
-                       timeout=AutodiscoverProtocol.TIMEOUT)
-        except CONNECTION_ERRORS as e:
-            raise TransportError(str(e))
-    return _get_auth_method_from_response(response=r)
-
-
-def get_docs_authtype(docs_url):
-    # Get auth type by tasting headers from the server. Don't do HEAD requests. It's too error prone.
-    log.debug('Getting docs auth type for %s', docs_url)
-    from .protocol import BaseProtocol
-    try:
-        with BaseProtocol.raw_session() as s:
-            r = s.get(url=docs_url, headers=DEFAULT_HEADERS.copy(), allow_redirects=False, timeout=BaseProtocol.TIMEOUT)
-    except CONNECTION_ERRORS as e:
-        raise TransportError(str(e))
-    return _get_auth_method_from_response(response=r)
-
-
-def get_service_authtype(service_endpoint, versions, name):
+def get_service_authtype(service_endpoint, retry_policy, api_versions, name):
     # Get auth type by tasting headers from the server. Only do POST requests. HEAD is too error prone, and some servers
     # are set up to redirect to OWA on all requests except POST to /EWS/Exchange.asmx
-    log.debug('Getting service auth type for %s', service_endpoint)
+    #
     # We don't know the API version yet, but we need it to create a valid request because some Exchange servers only
     # respond when given a valid request. Try all known versions. Gross.
     from .protocol import BaseProtocol
-    with BaseProtocol.raw_session() as s:
-        for version in versions:
-            data = dummy_xml(version=version, name=name)
-            log.debug('Requesting %s from %s', data, service_endpoint)
-            try:
-                r = s.post(url=service_endpoint, headers=DEFAULT_HEADERS.copy(), data=data, allow_redirects=False,
-                           timeout=BaseProtocol.TIMEOUT)
-            except CONNECTION_ERRORS as e:
-                raise TransportError(str(e))
-            try:
-                auth_type = _get_auth_method_from_response(response=r)
-                log.debug('Auth type is %s', auth_type)
-                return auth_type
-            except TransportError:
-                continue
+    retry = 0
+    wait = 10  # seconds
+    t_start = time.monotonic()
+    headers = DEFAULT_HEADERS.copy()
+    for api_version in api_versions:
+        data = dummy_xml(api_version=api_version, name=name)
+        log.debug('Requesting %s from %s', data, service_endpoint)
+        while True:
+            _back_off_if_needed(retry_policy.back_off_until)
+            log.debug('Trying to get service auth type for %s', service_endpoint)
+            with BaseProtocol.raw_session() as s:
+                try:
+                    r = s.post(url=service_endpoint, headers=headers, data=data, allow_redirects=False,
+                               timeout=BaseProtocol.TIMEOUT)
+                    break
+                except CONNECTION_ERRORS as e:
+                    # Don't retry on TLS errors. They will most likely be persistent.
+                    total_wait = time.monotonic() - t_start
+                    r = DummyResponse(url=service_endpoint, headers={}, request_headers=headers)
+                    if _may_retry_on_error(response=r, retry_policy=retry_policy, wait=total_wait):
+                        log.info("Connection error on URL %s (retry %s, error: %s). Cool down %s secs",
+                                 service_endpoint, retry, e, wait)
+                        retry_policy.back_off(wait)
+                        retry += 1
+                        continue
+                    else:
+                        raise TransportError(str(e)) from e
+        if r.status_code not in (200, 401):
+            log.debug('Unexpected response: %s %s', r.status_code, r.reason)
+            continue
+        try:
+            auth_type = get_auth_method_from_response(response=r)
+            log.debug('Auth type is %s', auth_type)
+            return auth_type, api_version
+        except UnauthorizedError:
+            continue
     raise TransportError('Failed to get auth type from service')
 
 
-def _get_auth_method_from_response(response):
+def get_auth_method_from_response(response):
     # First, get the auth method from headers. Then, test credentials. Don't handle redirects - burden is on caller.
     log.debug('Request headers: %s', response.request.headers)
     log.debug('Response headers: %s', response.headers)
     if response.status_code == 200:
         return NOAUTH
-    if response.status_code in (301, 302):
-        # Some servers are set up to redirect to OWA on all requests except POST to EWS/Exchange.asmx
-        try:
-            redirect_url = get_redirect_url(response, allow_relative=False)
-        except RelativeRedirect:
-            raise TransportError('Redirect to same host when trying to get auth method')
-        raise RedirectError(url=redirect_url)
-    if response.status_code != 401:
-        raise TransportError('Unexpected response: %s %s' % (response.status_code, response.reason))
-
     # Get auth type from headers
     for key, val in response.headers.items():
         if key.lower() == 'www-authenticate':
@@ -188,34 +167,34 @@ def _get_auth_method_from_response(response):
                 return NTLM
             if 'basic' in vals:
                 return BASIC
-    raise UnauthorizedError('Got a 401, but no compatible auth type was reported by server')
+    raise UnauthorizedError('No compatible auth type was reported by server')
 
 
 def _tokenize(val):
     # Splits cookie auth values
-    auth_tokens = []
-    auth_token = ''
+    auth_methods = []
+    auth_method = ''
     quote = False
     for c in val:
         if c in (' ', ',') and not quote:
-            if auth_token not in ('', ','):
-                auth_tokens.append(auth_token)
-            auth_token = ''
+            if auth_method not in ('', ','):
+                auth_methods.append(auth_method)
+            auth_method = ''
             continue
         elif c == '"':
-            auth_token += c
+            auth_method += c
             if quote:
-                auth_tokens.append(auth_token)
-                auth_token = ''
+                auth_methods.append(auth_method)
+                auth_method = ''
             quote = not quote
             continue
-        auth_token += c
-    if auth_token:
-        auth_tokens.append(auth_token)
-    return auth_tokens
+        auth_method += c
+    if auth_method:
+        auth_methods.append(auth_method)
+    return auth_methods
 
 
-def dummy_xml(version, name):
+def dummy_xml(api_version, name):
     # Generate a minimal, valid EWS request
     from .services import ResolveNames  # Avoid circular import
     return wrap(content=ResolveNames(protocol=None).get_payload(
@@ -224,4 +203,4 @@ def dummy_xml(version, name):
         return_full_contact_data=False,
         search_scope=None,
         contact_data_shape=None,
-    ), version=version)
+    ), api_version=api_version)

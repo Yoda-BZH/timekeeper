@@ -1,5 +1,3 @@
-from __future__ import unicode_literals
-
 from base64 import b64decode
 from codecs import BOM_UTF8
 from collections import OrderedDict
@@ -10,38 +8,37 @@ import itertools
 import logging
 import re
 import socket
+from threading import get_ident
 import time
+from urllib.parse import urlparse
 import xml.sax.handler
 
 # Import _etree via defusedxml instead of directly from lxml.etree, to silence overly strict linters
 from defusedxml.lxml import parse, tostring, GlobalParserTLS, RestrictedElement, _etree
 from defusedxml.expatreader import DefusedExpatParser
 from defusedxml.sax import _InputSource
-from future.backports.misc import get_ident
-from future.moves.urllib.parse import urlparse
-from future.utils import PY2
+import dns.resolver
 import isodate
+from oauthlib.oauth2 import TokenExpiredError
 from pygments import highlight
 from pygments.lexers.html import XmlLexer
 from pygments.formatters.terminal import TerminalFormatter
 import requests.exceptions
-from six import text_type, string_types
 
 from .errors import TransportError, RateLimitError, RedirectError, RelativeRedirect, CASError, UnauthorizedError, \
     ErrorInvalidSchemaVersionForMailboxVersion
 
-time_func = time.time if PY2 else time.monotonic
 log = logging.getLogger(__name__)
 
 
 class ParseError(_etree.ParseError):
-    # Wrap lxml ParseError in our own class
+    """Used to wrap lxml ParseError in our own class"""
     pass
 
 
 class ElementNotFound(Exception):
     def __init__(self, msg, data):
-        super(ElementNotFound, self).__init__(msg)
+        super().__init__(msg)
         self.data = data
 
 
@@ -53,6 +50,9 @@ SOAPNS = 'http://schemas.xmlsoap.org/soap/envelope/'
 MNS = 'http://schemas.microsoft.com/exchange/services/2006/messages'
 TNS = 'http://schemas.microsoft.com/exchange/services/2006/types'
 ENS = 'http://schemas.microsoft.com/exchange/services/2006/errors'
+AUTODISCOVER_BASE_NS = 'http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006'
+AUTODISCOVER_REQUEST_NS = 'http://schemas.microsoft.com/exchange/autodiscover/outlook/requestschema/2006'
+AUTODISCOVER_RESPONSE_NS = 'http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a'
 
 ns_translation = OrderedDict([
     ('s', SOAPNS),
@@ -64,8 +64,7 @@ for item in ns_translation.items():
 
 
 def is_iterable(value, generators_allowed=False):
-    """
-    Checks if value is a list-like object. Don't match generators and generator-like objects here by default, because
+    """Checks if value is a list-like object. Don't match generators and generator-like objects here by default, because
     callers don't necessarily guarantee that they only iterate the value once. Take care to not match string types and
     bytes.
 
@@ -74,7 +73,7 @@ def is_iterable(value, generators_allowed=False):
     :return: True or False
     """
     if generators_allowed:
-        if not isinstance(value, string_types + (bytes,)) and hasattr(value, '__iter__'):
+        if not isinstance(value, (bytes, str)) and hasattr(value, '__iter__'):
             return True
     else:
         if isinstance(value, (tuple, list, set)):
@@ -83,9 +82,7 @@ def is_iterable(value, generators_allowed=False):
 
 
 def chunkify(iterable, chunksize):
-    """
-    Splits an iterable into chunks of size ``chunksize``. The last chunk may be smaller than ``chunksize``.
-    """
+    """Splits an iterable into chunks of size ``chunksize``. The last chunk may be smaller than ``chunksize``."""
     from .queryset import QuerySet
     if hasattr(iterable, '__getitem__') and not isinstance(iterable, QuerySet):
         # tuple, list. QuerySet has __getitem__ but that evaluates the entire query greedily. We don't want that here.
@@ -104,9 +101,7 @@ def chunkify(iterable, chunksize):
 
 
 def peek(iterable):
-    """
-    Checks if an iterable is empty and returns status and the rewinded iterable
-    """
+    """Checks if an iterable is empty and returns status and the rewinded iterable"""
     from .queryset import QuerySet
     if isinstance(iterable, QuerySet):
         # QuerySet has __len__ but that evaluates the entire query greedily. We don't want that here. Instead, peek()
@@ -130,7 +125,7 @@ def xml_to_str(tree, encoding=None, xml_declaration=False):
         raise ValueError("'xml_declaration' is not supported when 'encoding' is None")
     if encoding:
         return tostring(tree, encoding=encoding, xml_declaration=True)
-    return tostring(tree, encoding=text_type, xml_declaration=False)
+    return tostring(tree, encoding=str, xml_declaration=False)
 
 
 def get_xml_attr(tree, name):
@@ -149,12 +144,12 @@ def value_to_xml_text(value):
     from .ewsdatetime import EWSTimeZone, EWSDateTime, EWSDate
     from .indexed_properties import PhoneNumber, EmailAddress
     from .properties import Mailbox, Attendee, ConversationId
-    if isinstance(value, string_types):
+    if isinstance(value, str):
         return safe_xml_value(value)
     if isinstance(value, bool):
         return '1' if value else '0'
     if isinstance(value, (int, Decimal)):
-        return text_type(value)
+        return str(value)
     if isinstance(value, datetime.time):
         return value.isoformat()
     if isinstance(value, EWSTimeZone):
@@ -185,7 +180,7 @@ def xml_text_to_value(value, value_type):
         Decimal: Decimal,
         datetime.timedelta: isodate.parse_duration,
         EWSDateTime: EWSDateTime.from_string,
-        string_types[0]: lambda v: v
+        str: lambda v: v
     }[value_type](value)
 
 
@@ -194,7 +189,7 @@ def set_xml_value(elem, value, version):
     from .fields import FieldPath, FieldOrder
     from .properties import EWSElement
     from .version import Version
-    if isinstance(value, string_types + (bool, bytes, int, Decimal, datetime.time, EWSDate, EWSDateTime)):
+    if isinstance(value, (str, bool, bytes, int, Decimal, datetime.time, EWSDate, EWSDateTime)):
         elem.text = value_to_xml_text(value)
     elif isinstance(value, RestrictedElement):
         elem.append(value)
@@ -208,7 +203,7 @@ def set_xml_value(elem, value, version):
                 elem.append(v.to_xml(version=version))
             elif isinstance(v, RestrictedElement):
                 elem.append(v)
-            elif isinstance(v, string_types):
+            elif isinstance(v, str):
                 add_xml_child(elem, 't:String', v)
             else:
                 raise ValueError('Unsupported type %s for list element %s on elem %s' % (type(v), v, elem))
@@ -216,7 +211,7 @@ def set_xml_value(elem, value, version):
         elem.append(value.to_xml())
     elif isinstance(value, EWSElement):
         if not isinstance(version, Version):
-            raise ValueError("'version' %s must be a Version instance" % version)
+            raise ValueError("'version' %r must be a Version instance" % version)
         elem.append(value.to_xml(version=version))
     else:
         raise ValueError('Unsupported type %s for value %s on elem %s' % (type(value), value, elem))
@@ -224,7 +219,7 @@ def set_xml_value(elem, value, version):
 
 
 def safe_xml_value(value, replacement='?'):
-    return text_type(_ILLEGAL_XML_CHARS_RE.sub(replacement, value))
+    return _ILLEGAL_XML_CHARS_RE.sub(replacement, value)
 
 
 def create_element(name, attrs=None, nsmap=None):
@@ -233,7 +228,11 @@ def create_element(name, attrs=None, nsmap=None):
     if ':' in name:
         ns, name = name.split(':')
         name = '{%s}%s' % (ns_translation[ns], name)
-    elem = RestrictedElement(attrib=attrs, nsmap=nsmap)
+    elem = RestrictedElement(nsmap=nsmap)
+    if attrs:
+        # Try hard to keep attribute order, to ensure deterministic output. This simplifies testing.
+        for k, v in attrs.items():
+            elem.set(k, v)
     elem.tag = name
     return elem
 
@@ -280,6 +279,19 @@ def prepare_input_source(source):
     return source
 
 
+def safe_b64decode(data):
+    # Incoming base64-encoded data is not always padded to a multiple of 4. Python's parser is more strict and requires
+    # padding. Add padding if it's needed.
+    overflow = len(data) % 4
+    if overflow:
+        if isinstance(data, str):
+            padding = '=' * (4 - overflow)
+        else:
+            padding = b'=' * (4 - overflow)
+        data += padding
+    return b64decode(data)
+
+
 class StreamingBase64Parser(DefusedExpatParser):
     """A SAX parser that returns a generator of base64-decoded character content"""
     def __init__(self, *args, **kwargs):
@@ -304,15 +316,13 @@ class StreamingBase64Parser(DefusedExpatParser):
             for data in self.feed(buffer):
                 yield data
             buffer = file.read(self._bufsize)
+        # Any remaining data in self.buffer should be padding chars now
         self.buffer = None
         source.close()
         self.close()
         if not self.element_found:
-            if PY2:
-                data = b''.join(collected_data)
-            else:
-                data = bytes(collected_data)
-            raise ElementNotFound('The element to be streamed from was not found', data=data)
+            data = bytes(collected_data)
+            raise ElementNotFound('The element to be streamed from was not found', data=bytes(data))
 
     def feed(self, data, isFinal=0):
         # Like upstream, but yields the current content of the character buffer
@@ -323,7 +333,7 @@ class StreamingBase64Parser(DefusedExpatParser):
         remainder = ''
         for data in self.buffer:
             available = len(remainder) + len(data)
-            overflow = available % 4
+            overflow = available % 4  # Make sure we always decode a multiple of 4
             if remainder:
                 data = (remainder + data)
                 remainder = ''
@@ -338,34 +348,59 @@ class ForgivingParser(GlobalParserTLS):
     parser_config = {
         'resolve_entities': False,
         'recover': True,  # This setting is non-default
+        'huge_tree': True,  # This setting enables parsing huge attachments, mime_content and other large data
     }
 
 
 _forgiving_parser = ForgivingParser()
 
 
-class BytesGeneratorIO(io.BytesIO):
-    # A BytesIO that can produce bytes from a streaming HTTP request. Expects r.iter_content() as input
+class BytesGeneratorIO(io.RawIOBase):
+    """A BytesIO that can produce bytes from a streaming HTTP request. Expects r.iter_content() as input
+    lxml tries to be smart by calling `getvalue` when present, assuming that the entire string is in memory.
+    Omitting `getvalue` forces lxml to stream the request through `read` avoiding the memory duplication.
+    """
     def __init__(self, bytes_generator):
         self._bytes_generator = bytes_generator
+        self._next = bytearray()
         self._tell = 0
-        super(BytesGeneratorIO, self).__init__()
+        super().__init__()
 
-    def getvalue(self):
-        res = b''.join(self._bytes_generator)
-        self._tell += len(res)
-        return res
+    def readable(self):
+        return not self.closed
 
     def tell(self):
         return self._tell
 
     def read(self, size=-1):
-        if size is None or size <= -1:
-            res = b''.join(self._bytes_generator)
-        else:
-            res = b''.join(next(self._bytes_generator) for _ in range(size))
+        # requests `iter_content()` auto-adjusts the number of bytes based on bandwidth
+        # can't assume how many bytes next returns so stash any extra in `self._next`
+        if self.closed:
+            raise ValueError("read from a closed file")
+        if self._next is None:
+            return b''
+        if size is None:
+            size = -1
+
+        res = self._next
+        while size < 0 or len(res) < size:
+            try:
+                res.extend(next(self._bytes_generator))
+            except StopIteration:
+                self._next = None
+                break
+
+        if size > 0 and self._next is not None:
+            self._next = res[size:]
+            res = res[:size]
+
         self._tell += len(res)
-        return res
+        return bytes(res)
+
+    def close(self):
+        if not self.closed:
+            self._bytes_generator.close()
+        super().close()
 
 
 def to_xml(bytes_content):
@@ -384,18 +419,21 @@ def to_xml(bytes_content):
         if hasattr(e, 'position'):
             e.lineno, e.offset = e.position
         if not e.lineno:
-            raise ParseError(text_type(e), '<not from file>', e.lineno, e.offset)
+            raise ParseError(str(e), '<not from file>', e.lineno, e.offset)
         try:
             stream.seek(0)
             offending_line = stream.read().splitlines()[e.lineno - 1]
-        except IndexError:
-            raise ParseError(text_type(e), '<not from file>', e.lineno, e.offset)
+        except (IndexError, io.UnsupportedOperation):
+            raise ParseError(str(e), '<not from file>', e.lineno, e.offset)
         else:
             offending_excerpt = offending_line[max(0, e.offset - 20):e.offset + 20]
-            msg = '%s\nOffending text: [...]%s[...]' % (text_type(e), offending_excerpt)
+            msg = '%s\nOffending text: [...]%s[...]' % (str(e), offending_excerpt)
             raise ParseError(msg, e.lineno, e.offset)
     except TypeError:
-        stream.seek(0)
+        try:
+            stream.seek(0)
+        except (IndexError, io.UnsupportedOperation):
+            pass
         raise ParseError('This is not XML: %r' % stream.read(), '<not from file>', -1, 0)
 
 
@@ -446,14 +484,11 @@ class PrettyXmlHandler(logging.StreamHandler):
                 if not is_xml(value):
                     continue
                 try:
-                    if PY2:
-                        record.args[key] = self.highlight_xml(self.prettify_xml(value)).encode('utf-8')
-                    else:
-                        record.args[key] = self.highlight_xml(self.prettify_xml(value))
+                    record.args[key] = self.highlight_xml(self.prettify_xml(value))
                 except Exception as e:
                     # Something bad happened, but we don't want to crash the program just because logging failed
                     print('XML highlighting failed: %s' % e)
-        return super(PrettyXmlHandler, self).emit(record)
+        return super().emit(record)
 
     def is_tty(self):
         # Check if we're outputting to a terminal
@@ -467,7 +502,7 @@ class AnonymizingXmlHandler(PrettyXmlHandler):
     """A steaming log handler that prettifies and anonymizes log statements containing XML when output is a terminal"""
     def __init__(self, forbidden_strings, *args, **kwargs):
         self.forbidden_strings = forbidden_strings
-        super(AnonymizingXmlHandler, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def parse_bytes(self, xml_bytes):
         root = parse(io.BytesIO(xml_bytes))
@@ -479,14 +514,14 @@ class AnonymizingXmlHandler(PrettyXmlHandler):
         return root
 
 
-class DummyRequest(object):
+class DummyRequest:
     def __init__(self, headers):
         self.headers = headers
 
 
-class DummyResponse(object):
-    def __init__(self, url, headers, request_headers, content=b''):
-        self.status_code = 503
+class DummyResponse:
+    def __init__(self, url, headers, request_headers, content=b'', status_code=503):
+        self.status_code = status_code
         self.url = url
         self.headers = headers
         self.content = content
@@ -506,8 +541,19 @@ def get_domain(email):
 
 def split_url(url):
     parsed_url = urlparse(url)
-    # Use netloc instead og hostname since hostname is None if URL is relative
+    # Use netloc instead of hostname since hostname is None if URL is relative
     return parsed_url.scheme == 'https', parsed_url.netloc.lower(), parsed_url.path
+
+
+def is_valid_hostname(hostname, timeout):
+    log.debug('Checking if %s can be looked up in DNS', hostname)
+    resolver = dns.resolver.Resolver()
+    resolver.timeout = timeout
+    try:
+        resolver.query(hostname)
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+        return False
+    return True
 
 
 def get_redirect_url(response, allow_relative=True, require_relative=False):
@@ -541,14 +587,12 @@ def get_redirect_url(response, allow_relative=True, require_relative=False):
     return redirect_url
 
 
-MAX_REDIRECTS = 5  # Define a max redirection count. We don't want to be sent into an endless redirect loop
+RETRY_WAIT = 10  # Seconds to wait before retry on connection errors
+MAX_REDIRECTS = 10  # Maximum number of URL redirects before we give up
 
 # A collection of error classes we want to handle as general connection errors
 CONNECTION_ERRORS = (requests.exceptions.ChunkedEncodingError, requests.exceptions.ConnectionError,
-                     requests.exceptions.Timeout, socket.timeout)
-if not PY2:
-    # Python2 does not have ConnectionResetError
-    CONNECTION_ERRORS += (ConnectionResetError,)
+                     requests.exceptions.Timeout, socket.timeout, ConnectionResetError)
 
 # A collection of error classes we want to handle as TLS verification errors
 TLS_ERRORS = (requests.exceptions.SSLError,)
@@ -584,16 +628,13 @@ def post_ratelimited(protocol, session, url, headers, data, allow_redirects=Fals
     intend to raise an exception. We give up on max_wait timeout, not number of retries.
 
     An additional resource on handling throttling policies and client back off strategies:
-        https://msdn.microsoft.com/en-us/library/office/jj945066(v=exchg.150).aspx#bk_ThrottlingBatch
+        https://docs.microsoft.com/en-us/exchange/client-developer/exchange-web-services/ews-throttling-in-exchange
     """
     thread_id = get_ident()
-    wait = 10  # seconds
+    wait = RETRY_WAIT  # Initial retry wait. We double the value on each retry
     retry = 0
     redirects = 0
-    # In Python 2, we want this to be a 'str' object so logging doesn't break (all formatting arguments are 'str').
-    # We activated 'unicode_literals' at the top of this file, so it would be a 'unicode' object unless we convert
-    # to 'str' explicitly. This is a no-op for Python 3.
-    log_msg = str('''\
+    log_msg = '''\
 Retry: %(retry)s
 Waited: %(wait)s
 Timeout: %(timeout)s
@@ -610,7 +651,7 @@ Request headers: %(request_headers)s
 Response headers: %(response_headers)s
 Request data: %(xml_request)s
 Response data: %(xml_response)s
-''')
+'''
     log_vals = dict(
         retry=retry,
         wait=wait,
@@ -629,40 +670,53 @@ Response data: %(xml_response)s
         xml_request=data,
         xml_response=None,
     )
+    t_start = time.monotonic()
     try:
         while True:
-            _back_off_if_needed(protocol.credentials.back_off_until)
+            backed_off = _back_off_if_needed(protocol.retry_policy.back_off_until)
+            if backed_off:
+                # We may have slept for a long time. Renew the session.
+                session = protocol.renew_session(session)
             log.debug('Session %s thread %s: retry %s timeout %s POST\'ing to %s after %ss wait', session.session_id,
                       thread_id, retry, protocol.TIMEOUT, url, wait)
-            d_start = time_func()
+            d_start = time.monotonic()
             # Always create a dummy response for logging purposes, in case we fail in the following
             r = DummyResponse(url=url, headers={}, request_headers=headers)
             try:
                 r = session.post(url=url, headers=headers, data=data, allow_redirects=False, timeout=protocol.TIMEOUT,
                                  stream=stream)
+            except TLS_ERRORS as e:
+                # Don't retry on TLS errors. They will most likely be persistent.
+                raise TransportError(str(e))
             except CONNECTION_ERRORS as e:
                 log.debug('Session %s thread %s: connection error POST\'ing to %s', session.session_id, thread_id, url)
                 r = DummyResponse(url=url, headers={'TimeoutException': e}, request_headers=headers)
+            except TokenExpiredError as e:
+                log.debug('Session %s thread %s: OAuth token expired; refreshing', session.session_id, thread_id)
+                r = DummyResponse(url=url, headers={'TokenExpiredError': e}, request_headers=headers, status_code=401)
             finally:
                 log_vals.update(
                     retry=retry,
                     wait=wait,
                     session_id=session.session_id,
                     url=str(r.url),
-                    response_time=time_func() - d_start,
+                    response_time=time.monotonic() - d_start,
                     status_code=r.status_code,
                     request_headers=r.request.headers,
                     response_headers=r.headers,
                     xml_response='[STREAMING]' if stream else r.content,
                 )
             log.debug(log_msg, log_vals)
-            if _may_retry_on_error(r, protocol, wait):
+            if _need_new_credentials(response=r):
+                session = protocol.refresh_credentials(session)
+                continue
+            total_wait = time.monotonic() - t_start
+            if _may_retry_on_error(response=r, retry_policy=protocol.retry_policy, wait=total_wait):
                 log.info("Session %s thread %s: Connection error on URL %s (code %s). Cool down %s secs",
                          session.session_id, thread_id, r.url, r.status_code, wait)
-                time.sleep(wait)  # Increase delay for every retry
+                protocol.retry_policy.back_off(wait)
                 retry += 1
-                wait *= 2
-                session = protocol.renew_session(session)
+                wait *= 2  # Increase delay for every retry
                 continue
             if r.status_code in (301, 302):
                 if stream:
@@ -700,9 +754,22 @@ def _back_off_if_needed(back_off_until):
         if sleep_secs > 0:
             log.warning('Server requested back off until %s. Sleeping %s seconds', back_off_until, sleep_secs)
             time.sleep(sleep_secs)
+            return True
+    return False
 
 
-def _may_retry_on_error(response, protocol, wait):
+def _may_retry_on_error(response, retry_policy, wait):
+    if response.status_code not in (301, 302, 401, 503):
+        # Don't retry if we didn't get a status code that we can hope to recover from
+        log.debug('No retry: wrong status code %s', response.status_code)
+        return False
+    if retry_policy.fail_fast:
+        log.debug('No retry: no fail-fast policy')
+        return False
+    if wait > retry_policy.max_wait:
+        # We lost patience. Session is cleaned up in outer loop
+        raise RateLimitError(
+            'Max timeout reached', url=response.url, status_code=response.status_code, total_wait=wait)
     # The genericerrorpage.htm/internalerror.asp is ridiculous behaviour for random outages. Redirect to
     # '/internalsite/internalerror.asp' or '/internalsite/initparams.aspx' is caused by e.g. TLS certificate
     # f*ckups on the Exchange server.
@@ -711,17 +778,14 @@ def _may_retry_on_error(response, protocol, wait):
             or (response.status_code == 302 and response.headers.get('location', '').lower() ==
                 '/ews/genericerrorpage.htm?aspxerrorpath=/ews/exchange.asmx') \
             or (response.status_code == 503):
-        if response.status_code not in (301, 302, 401, 503):
-            # Don't retry if we didn't get a status code that we can hope to recover from
-            return False
-        if protocol.credentials.fail_fast:
-            return False
-        if wait > protocol.credentials.max_wait:
-            # We lost patience. Session is cleaned up in outer loop
-            raise RateLimitError(
-                'Max timeout reached', url=response.url, status_code=response.status_code, total_wait=wait)
+        log.debug('Retry allowed: conditions met')
         return True
     return False
+
+
+def _need_new_credentials(response):
+    return response.status_code == 401 \
+        and response.headers.get('TokenExpiredError')
 
 
 def _redirect_or_fail(response, redirects, allow_redirects):
@@ -753,7 +817,7 @@ def _raise_response_errors(response, protocol, log_msg, log_vals):
         raise ErrorInvalidSchemaVersionForMailboxVersion('Invalid server version')
     if b'The referenced account is currently locked out' in response.content:
         raise TransportError('The service account is currently locked out')
-    if response.status_code == 401 and protocol.credentials.fail_fast:
+    if response.status_code == 401 and protocol.retry_policy.fail_fast:
         # This is a login failure
         raise UnauthorizedError('Wrong username or password for %s' % response.url)
     if 'TimeoutException' in response.headers:

@@ -10,7 +10,7 @@ log = logging.getLogger(__name__)
 
 class UpdateItem(EWSAccountService, EWSPooledMixIn):
     """
-    MSDN: https://msdn.microsoft.com/en-us/library/office/aa580254(v=exchg.150).aspx
+    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/updateitem
     """
     SERVICE_NAME = 'UpdateItem'
     element_container_name = '{%s}Items' % MNS
@@ -43,6 +43,7 @@ class UpdateItem(EWSAccountService, EWSPooledMixIn):
         # Take a list of fieldnames and return the (unique) fields in the order they are mentioned in item_class.FIELDS.
         # Checks that all fieldnames are valid.
         unique_fieldnames = list(OrderedDict.fromkeys(fieldnames))  # Make field names unique ,but keep ordering
+        # Loop over FIELDS and not supported_fields(). Upstream should make sure not to update a non-supported field.
         for f in item_model.FIELDS:
             if f.name in unique_fieldnames:
                 unique_fieldnames.remove(f.name)

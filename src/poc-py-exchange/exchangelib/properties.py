@@ -1,5 +1,3 @@
-from __future__ import unicode_literals
-
 import abc
 import binascii
 import codecs
@@ -9,14 +7,12 @@ import logging
 import struct
 from threading import Lock
 
-from future.utils import PY2
-from six import text_type, string_types
-
 from .fields import SubField, TextField, EmailAddressField, ChoiceField, DateTimeField, EWSElementField, MailboxField, \
     Choice, BooleanField, IdField, ExtendedPropertyField, IntegerField, TimeField, EnumField, CharField, EmailField, \
-    EWSElementListField, EnumListField, FreeBusyStatusField, UnknownEntriesField, WEEKDAY_NAMES, FieldPath, Field
+    EWSElementListField, EnumListField, FreeBusyStatusField, UnknownEntriesField, MessageField, RecipientAddressField, \
+    WEEKDAY_NAMES, FieldPath, Field
 from .util import get_xml_attr, create_element, set_xml_value, value_to_xml_text, MNS, TNS
-from .version import EXCHANGE_2013
+from .version import Version, EXCHANGE_2013
 
 log = logging.getLogger(__name__)
 
@@ -29,27 +25,31 @@ class InvalidFieldForVersion(ValueError):
     pass
 
 
-class Body(text_type):
-    # Helper to mark the 'body' field as a complex attribute.
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/jj219983(v=exchg.150).aspx
+class Body(str):
+    """Helper to mark the 'body' field as a complex attribute.
+
+    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/body
+    """
     body_type = 'Text'
 
     def __add__(self, other):
         # Make sure Body('') + 'foo' returns a Body type
-        return self.__class__(super(Body, self).__add__(other))
+        return self.__class__(super().__add__(other))
 
     def __mod__(self, other):
         # Make sure Body('%s') % 'foo' returns a Body type
-        return self.__class__(super(Body, self).__mod__(other))
+        return self.__class__(super().__mod__(other))
 
     def format(self, *args, **kwargs):
         # Make sure Body('{}').format('foo') returns a Body type
-        return self.__class__(super(Body, self).format(*args, **kwargs))
+        return self.__class__(super().format(*args, **kwargs))
 
 
 class HTMLBody(Body):
-    # Helper to mark the 'body' field as a complex attribute.
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/jj219983(v=exchg.150).aspx
+    """Helper to mark the 'body' field as a complex attribute.
+
+    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/body
+    """
     body_type = 'HTML'
 
 
@@ -81,8 +81,8 @@ class UID(bytes):
         0, 0, 0, 0,
         0, 0, 0, 0)))
 
-    # https://msdn.microsoft.com/en-us/library/ee157690(v=exchg.80).aspx
-    # https://msdn.microsoft.com/en-us/library/hh338153(v=exchg.80).aspx
+    # https://docs.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxocal/1d3aac05-a7b9-45cc-a213-47f0a0a2c5c1
+    # https://docs.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-asemail/e7424ddc-dd10-431e-a0b7-5c794863370e
     # https://stackoverflow.com/questions/42259122
     # https://stackoverflow.com/questions/33757805
 
@@ -92,12 +92,11 @@ class UID(bytes):
         encoding = b''.join([
             cls._HEADER, cls._EXCEPTION_REPLACEMENT_TIME, cls._CREATION_TIME, cls._RESERVED, length, payload
         ])
-        return super(UID, cls).__new__(cls, codecs.decode(encoding, 'hex'))
+        return super().__new__(cls, codecs.decode(encoding, 'hex'))
 
 
-class EWSElement(object):
-    __metaclass__ = abc.ABCMeta
-
+class EWSElement(metaclass=abc.ABCMeta):
+    """Base class for all XML element implementations"""
     ELEMENT_NAME = None  # The name of the XML tag
     FIELDS = []  # A list of attributes supported by this item class, ordered the same way as in EWS documentation
     NAMESPACE = TNS  # The XML tag namespace. Either TNS or MNS
@@ -105,7 +104,6 @@ class EWSElement(object):
     _fields_lock = Lock()
 
     __slots__ = tuple()
-    __slots_keys = None
 
     def __init__(self, **kwargs):
         for f in self.FIELDS:
@@ -116,7 +114,8 @@ class EWSElement(object):
     @classmethod
     def _slots_keys(cls):
         # Find __slots__ entries for this and all parent classes. Keep order, with parent slots first.
-        if cls.__slots_keys is None:
+        attr_name = '_%s_slots_cache' % {cls.__name__}
+        if not hasattr(cls, attr_name):
             seen = set()
             keys = []
             for c in reversed(getmro(cls)):
@@ -124,16 +123,33 @@ class EWSElement(object):
                     continue
                 for k in c.__slots__:
                     if k in seen:
+                        # We allow duplicate keys because we don't want to require subclasses of e.g.
+                        # ExtendedProperty to define an empty __slots__ class attribute.
                         continue
                     keys.append(k)
                     seen.add(k)
-            cls.__slots_keys = tuple(keys)
-        return cls.__slots_keys
+            setattr(cls, attr_name, keys)
+        return getattr(cls, attr_name)
+
+    def __setattr__(self, key, value):
+        # Avoid silently accepting spelling errors to field names that are not set via __init__. We need to be able to
+        # set values for predefined and registered fields, whatever non-field attributes this class defines, and
+        # property setters.
+        for f in self.FIELDS:
+            if f.name == key:
+                return super().__setattr__(key, value)
+        if key in self._slots_keys():
+            return super().__setattr__(key, value)
+        if hasattr(self, key):
+            # Property setters
+            return super().__setattr__(key, value)
+        raise AttributeError('%r is not a valid attribute. See %s.FIELDS for valid field names' % (
+            key, self.__class__.__name__))
 
     def clean(self, version=None):
         # Validate attribute values using the field validator
         for f in self.FIELDS:
-            if not f.supports_version(version):
+            if version and not f.supports_version(version):
                 continue
             if isinstance(f, ExtendedPropertyField) and not hasattr(self, f.name):
                 # The extended field may have been registered after this item was created. Set default values.
@@ -204,8 +220,8 @@ class EWSElement(object):
         return tuple(f for f in cls.FIELDS if f.is_attribute)
 
     @classmethod
-    def supported_fields(cls, version=None):
-        # Return non-ID field names. If version is specified, only return the fields supported by this version
+    def supported_fields(cls, version):
+        """Return non-ID field names. If version is specified, only return the fields supported by this version"""
         return tuple(f for f in cls.FIELDS if not f.is_attribute and f.supports_version(version))
 
     @classmethod
@@ -217,15 +233,18 @@ class EWSElement(object):
 
     @classmethod
     def validate_field(cls, field, version):
-        # Takes a list of fieldnames, Field or FieldPath objects pointing to item fields, and checks that they are valid
-        # for the given version.
+        """Takes a list of fieldnames, Field or FieldPath objects pointing to item fields, and checks that they are
+        valid for the given version.
+        """
+        if not isinstance(version, Version):
+            raise ValueError("'version' %r must be a Version instance" % version)
         # Allow both Field and FieldPath instances and string field paths as input
-        if isinstance(field, string_types):
+        if isinstance(field, str):
             field = cls.get_field_by_fieldname(fieldname=field)
         elif isinstance(field, FieldPath):
             field = field.field
         if not isinstance(field, Field):
-            raise ValueError("Field %r must be a string, Field or FieldPath object" % field)
+            raise ValueError("Field %r must be a string, Field or FieldPath instance" % field)
         cls.get_field_by_fieldname(fieldname=field.name)  # Will raise if field name is invalid
         if not field.supports_version(version):
             # The field exists but is not valid for this version
@@ -235,15 +254,21 @@ class EWSElement(object):
 
     @classmethod
     def add_field(cls, field, insert_after):
-        # Insert a new field at the preferred place in the tuple and invalidate the fieldname cache
+        """Insert a new field at the preferred place in the tuple and update the slots cache"""
         with cls._fields_lock:
             idx = tuple(f.name for f in cls.FIELDS).index(insert_after) + 1
+            # This class may not have its own FIELDS attribute. Make sure not to edit an attribute belonging to a parent
+            # class.
+            cls.FIELDS = list(cls.FIELDS)
             cls.FIELDS.insert(idx, field)
 
     @classmethod
     def remove_field(cls, field):
-        # Remove the given field and invalidate the fieldname cache
+        """Remove the given field and and update the slots cache"""
         with cls._fields_lock:
+            # This class may not have its own FIELDS attribute. Make sure not to edit an attribute belonging to a parent
+            # class.
+            cls.FIELDS = list(cls.FIELDS)
             cls.FIELDS.remove(field)
 
     def __eq__(self, other):
@@ -253,26 +278,6 @@ class EWSElement(object):
         return hash(
             tuple(tuple(getattr(self, f.name) or ()) if f.is_list else getattr(self, f.name) for f in self.FIELDS)
         )
-
-    if PY2:
-        def __getstate__(self):
-            try:
-                state = self.__dict__.copy()
-            except AttributeError:
-                # This is a class where only __slots__ is defined
-                state = {}
-            state.update({k: getattr(self, k) for k in self._slots_keys()})
-            return state
-
-        def __setstate__(self, state):
-            try:
-                for k in self.__dict__.keys():
-                    setattr(self, k, state.get(k))
-            except AttributeError:
-                # This is a class where only __slots__ is defined
-                pass
-            for k in self._slots_keys():
-                setattr(self, k, state.get(k))
 
     def _field_vals(self):
         field_vals = []  # Keep sorting
@@ -295,7 +300,7 @@ class EWSElement(object):
 
 
 class MessageHeader(EWSElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa565307(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/internetmessageheader"""
     ELEMENT_NAME = 'InternetMessageHeader'
 
     FIELDS = [
@@ -307,8 +312,10 @@ class MessageHeader(EWSElement):
 
 
 class ItemId(EWSElement):
-    # 'id' and 'changekey' are UUIDs generated by Exchange
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa580234(v=exchg.150).aspx
+    """'id' and 'changekey' are UUIDs generated by Exchange
+
+    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/itemid
+    """
     ELEMENT_NAME = 'ItemId'
 
     ID_ATTR = 'Id'
@@ -324,11 +331,11 @@ class ItemId(EWSElement):
         if not kwargs:
             # Allow to set attributes without keyword
             kwargs = dict(zip(self._slots_keys(), args))
-        super(ItemId, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
 
 class ParentItemId(ItemId):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa563720(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/parentitemid"""
     ELEMENT_NAME = 'ParentItemId'
     NAMESPACE = MNS
 
@@ -336,7 +343,7 @@ class ParentItemId(ItemId):
 
 
 class RootItemId(ItemId):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/bb204277(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/rootitemid"""
     ELEMENT_NAME = 'RootItemId'
     NAMESPACE = MNS
 
@@ -351,14 +358,15 @@ class RootItemId(ItemId):
 
 
 class AssociatedCalendarItemId(ItemId):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa581060(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/associatedcalendaritemid
+    """
     ELEMENT_NAME = 'AssociatedCalendarItemId'
 
     __slots__ = tuple()
 
 
 class ConversationId(ItemId):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/dd899527(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/conversationid"""
     ELEMENT_NAME = 'ConversationId'
 
     FIELDS = [
@@ -371,21 +379,21 @@ class ConversationId(ItemId):
 
 
 class ParentFolderId(ItemId):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa494327(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/parentfolderid"""
     ELEMENT_NAME = 'ParentFolderId'
 
     __slots__ = tuple()
 
 
 class ReferenceItemId(ItemId):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa564031(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/referenceitemid"""
     ELEMENT_NAME = 'ReferenceItemId'
 
     __slots__ = tuple()
 
 
 class PersonaId(ItemId):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/jj191430(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/personaid"""
     ELEMENT_NAME = 'PersonaId'
     NAMESPACE = MNS
 
@@ -398,14 +406,14 @@ class PersonaId(ItemId):
 
 
 class FolderId(ItemId):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa579461(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/folderid"""
     ELEMENT_NAME = 'FolderId'
 
     __slots__ = tuple()
 
 
 class Mailbox(EWSElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa565036(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/mailbox"""
     ELEMENT_NAME = 'Mailbox'
 
     FIELDS = [
@@ -422,28 +430,52 @@ class Mailbox(EWSElement):
     __slots__ = tuple(f.name for f in FIELDS)
 
     def clean(self, version=None):
-        super(Mailbox, self).clean(version=version)
+        super().clean(version=version)
         if not self.email_address and not self.item_id:
-            # See "Remarks" section of https://msdn.microsoft.com/en-us/library/office/aa565036(v=exchg.150).aspx
+            # See "Remarks" section of
+            # https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/mailbox
             raise ValueError("Mailbox must have either 'email_address' or 'item_id' set")
 
     def __hash__(self):
         # Exchange may add 'mailbox_type' and 'name' on insert. We're satisfied if the item_id or email address matches.
         if self.item_id:
             return hash(self.item_id)
-        return hash(self.email_address.lower())
+        if self.email_address:
+            return hash(self.email_address.lower())
+        return super().__hash__()
 
 
 class DLMailbox(Mailbox):
-    # Like Mailbox, but creates elements in the 'messages' namespace when sending requests
+    """Like Mailbox, but creates elements in the 'messages' namespace when sending requests"""
     NAMESPACE = MNS
     __slots__ = tuple()
 
 
+class SendingAs(Mailbox):
+    """Like Mailbox, but creates elements in the 'messages' namespace when sending requests
+
+    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/sendingas
+    """
+    ELEMENT_NAME = 'SendingAs'
+    NAMESPACE = MNS
+    __slots__ = tuple()
+
+
+class RecipientAddress(Mailbox):
+    """Like Mailbox, but with a different tag name
+
+    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/recipientaddress
+    """
+    ELEMENT_NAME = 'RecipientAddress'
+
+    __slots__ = tuple()
+
+
 class AvailabilityMailbox(EWSElement):
-    # Like Mailbox, but with slightly different attributes
-    #
-    # MSDN: https://msdn.microsoft.com/en-us/library/aa564754(v=exchg.140).aspx
+    """Like Mailbox, but with slightly different attributes
+
+    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/mailbox-availability
+    """
     ELEMENT_NAME = 'Mailbox'
     FIELDS = [
         TextField('name', field_uri='Name'),
@@ -455,7 +487,9 @@ class AvailabilityMailbox(EWSElement):
 
     def __hash__(self):
         # Exchange may add 'name' on insert. We're satisfied if the email address matches.
-        return hash(self.email_address.lower())
+        if self.email_address:
+            return hash(self.email_address.lower())
+        return super().__hash__()
 
     @classmethod
     def from_mailbox(cls, mailbox):
@@ -465,20 +499,16 @@ class AvailabilityMailbox(EWSElement):
 
 
 class Email(AvailabilityMailbox):
-    # Like AvailabilityMailbox, but with a different tag name
-    #
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa565868(v=exchg.150).aspx
+    """Like AvailabilityMailbox, but with a different tag name
+    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/email-emailaddresstype
+    """
     ELEMENT_NAME = 'Email'
 
     __slots__ = tuple()
 
-    def __hash__(self):
-        # Exchange may add 'name' on insert. We're satisfied if the email address matches.
-        return hash(self.email_address.lower())
-
 
 class MailboxData(EWSElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa566036(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/mailboxdata"""
     ELEMENT_NAME = 'MailboxData'
     ATTENDEE_TYPES = {'Optional', 'Organizer', 'Required', 'Resource', 'Room'}
 
@@ -490,13 +520,9 @@ class MailboxData(EWSElement):
 
     __slots__ = tuple(f.name for f in FIELDS)
 
-    def __hash__(self):
-        # Exchange may add 'name' on insert. We're satisfied if the email address matches.
-        return hash((self.email.email_address.lower(), self.attendee_type, self.exclude_conflicts))
-
 
 class DistinguishedFolderId(ItemId):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa580808(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/distinguishedfolderid"""
     ELEMENT_NAME = 'DistinguishedFolderId'
 
     FIELDS = [
@@ -509,14 +535,14 @@ class DistinguishedFolderId(ItemId):
 
     def clean(self, version=None):
         from .folders import PublicFoldersRoot
-        super(DistinguishedFolderId, self).clean(version=version)
+        super().clean(version=version)
         if self.id == PublicFoldersRoot.DISTINGUISHED_FOLDER_ID:
             # Avoid "ErrorInvalidOperation: It is not valid to specify a mailbox with the public folder root" from EWS
             self.mailbox = None
 
 
 class TimeWindow(EWSElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa580740(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/timewindow"""
     ELEMENT_NAME = 'TimeWindow'
     FIELDS = [
         DateTimeField('start', field_uri='StartTime', is_required=True),
@@ -527,7 +553,7 @@ class TimeWindow(EWSElement):
 
 
 class FreeBusyViewOptions(EWSElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa565063(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/freebusyviewoptions"""
     ELEMENT_NAME = 'FreeBusyViewOptions'
     REQUESTED_VIEWS = {'MergedOnly', 'FreeBusy', 'FreeBusyMerged', 'Detailed', 'DetailedMerged'}
     FIELDS = [
@@ -543,7 +569,7 @@ class FreeBusyViewOptions(EWSElement):
 
 
 class Attendee(EWSElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa580339(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/attendee"""
     ELEMENT_NAME = 'Attendee'
 
     RESPONSE_TYPES = {'Unknown', 'Organizer', 'Tentative', 'Accept', 'Decline', 'NoResponseReceived'}
@@ -563,7 +589,7 @@ class Attendee(EWSElement):
 
 
 class TimeZoneTransition(EWSElement):
-    # Base class for StandardTime and DaylightTime classes
+    """Base class for StandardTime and DaylightTime classes"""
     FIELDS = [
         IntegerField('bias', field_uri='Bias', is_required=True),  # Offset from the default bias, in minutes
         TimeField('time', field_uri='Time', is_required=True),
@@ -577,7 +603,7 @@ class TimeZoneTransition(EWSElement):
 
     @classmethod
     def from_xml(cls, elem, account):
-        res = super(TimeZoneTransition, cls).from_xml(elem, account)
+        res = super().from_xml(elem, account)
         # Some parts of EWS use '5' to mean 'last occurrence in month', others use '-1'. Let's settle on '5' because
         # only '5' is accepted in requests.
         if res.occurrence == -1:
@@ -586,26 +612,26 @@ class TimeZoneTransition(EWSElement):
 
     def clean(self, version=None):
         # pylint: disable=access-member-before-definition
-        super(TimeZoneTransition, self).clean(version=version)
+        super().clean(version=version)
         if self.occurrence == -1:
             # See from_xml()
             self.occurrence = 5
 
 
 class StandardTime(TimeZoneTransition):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa563445(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/standardtime"""
     ELEMENT_NAME = 'StandardTime'
     __slots__ = tuple()
 
 
 class DaylightTime(TimeZoneTransition):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa564336(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/daylighttime"""
     ELEMENT_NAME = 'DaylightTime'
     __slots__ = tuple()
 
 
 class TimeZone(EWSElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa565658(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/timezone-availability"""
     ELEMENT_NAME = 'TimeZone'
 
     FIELDS = [
@@ -740,9 +766,7 @@ class TimeZone(EWSElement):
 
 
 class CalendarView(EWSElement):
-    """
-    MSDN: https://msdn.microsoft.com/en-US/library/office/aa564515%28v=exchg.150%29.aspx
-    """
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/calendarview"""
     ELEMENT_NAME = 'CalendarView'
     NAMESPACE = MNS
 
@@ -755,26 +779,43 @@ class CalendarView(EWSElement):
     __slots__ = tuple(f.name for f in FIELDS)
 
     def clean(self, version=None):
-        super(CalendarView, self).clean(version=version)
+        super().clean(version=version)
         if self.end < self.start:
             raise ValueError("'start' must be before 'end'")
 
 
+class CalendarEventDetails(EWSElement):
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/calendareventdetails"""
+    ELEMENT_NAME = 'CalendarEventDetails'
+    FIELDS = [
+        CharField('id', field_uri='ID'),
+        CharField('subject', field_uri='Subject'),
+        CharField('location', field_uri='Location'),
+        BooleanField('is_meeting', field_uri='IsMeeting'),
+        BooleanField('is_recurring', field_uri='IsRecurring'),
+        BooleanField('is_exception', field_uri='IsException'),
+        BooleanField('is_reminder_set', field_uri='IsReminderSet'),
+        BooleanField('is_private', field_uri='IsPrivate'),
+    ]
+
+    __slots__ = tuple(f.name for f in FIELDS)
+
+
 class CalendarEvent(EWSElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/aa564053(v=exchg.80).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/calendarevent"""
     ELEMENT_NAME = 'CalendarEvent'
     FIELDS = [
         DateTimeField('start', field_uri='StartTime'),
         DateTimeField('end', field_uri='EndTime'),
         FreeBusyStatusField('busy_type', field_uri='BusyType', is_required=True, default='Busy'),
-        # CalendarEventDetails
+        EWSElementField('details', field_uri='CalendarEventDetails', value_cls=CalendarEventDetails),
     ]
 
     __slots__ = tuple(f.name for f in FIELDS)
 
 
 class WorkingPeriod(EWSElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa580377(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/workingperiod"""
     ELEMENT_NAME = 'WorkingPeriod'
     FIELDS = [
         EnumListField('weekdays', field_uri='DayOfWeek', enum=WEEKDAY_NAMES, is_required=True),
@@ -786,7 +827,7 @@ class WorkingPeriod(EWSElement):
 
 
 class FreeBusyView(EWSElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/aa565398(v=exchg.80).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/freebusyview"""
     ELEMENT_NAME = 'FreeBusyView'
     NAMESPACE = MNS
     FIELDS = [
@@ -822,7 +863,7 @@ class FreeBusyView(EWSElement):
 
 
 class RoomList(Mailbox):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/dd899514(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/roomlist"""
     ELEMENT_NAME = 'RoomList'
     NAMESPACE = MNS
 
@@ -830,13 +871,13 @@ class RoomList(Mailbox):
 
     @classmethod
     def response_tag(cls):
-        # In a GetRoomLists response, room lists are delivered as Address elements
-        # MSDN: https://msdn.microsoft.com/en-us/library/office/dd899404(v=exchg.150).aspx
+        # In a GetRoomLists response, room lists are delivered as Address elements. See
+        # https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/address-emailaddresstype
         return '{%s}Address' % TNS
 
 
 class Room(Mailbox):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/dd899479(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/room"""
     ELEMENT_NAME = 'Room'
 
     __slots__ = tuple()
@@ -856,7 +897,8 @@ class Room(Mailbox):
 
 
 class Member(EWSElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/dd899487(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/member-ex15websvcsotherref
+    """
     ELEMENT_NAME = 'Member'
 
     FIELDS = [
@@ -874,7 +916,7 @@ class Member(EWSElement):
 
 
 class UserId(EWSElement):
-    # MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/userid
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/userid"""
     ELEMENT_NAME = 'UserId'
 
     FIELDS = [
@@ -891,7 +933,7 @@ class UserId(EWSElement):
 
 
 class Permission(EWSElement):
-    # MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/permission
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/permission"""
     ELEMENT_NAME = 'Permission'
 
     PERMISSION_ENUM = {Choice('None'), Choice('Owned'), Choice('All')}
@@ -917,7 +959,7 @@ class Permission(EWSElement):
 
 
 class CalendarPermission(EWSElement):
-    # MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/calendarpermission
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/calendarpermission"""
     ELEMENT_NAME = 'Permission'
 
     PERMISSION_ENUM = {Choice('None'), Choice('Owned'), Choice('All')}
@@ -933,10 +975,11 @@ class CalendarPermission(EWSElement):
 
 
 class PermissionSet(EWSElement):
-    # MSDN:
-    # https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/permissionset-permissionsettype
-    # and
-    # https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/permissionset-calendarpermissionsettype
+    """MSDN:
+    https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/permissionset-permissionsettype
+    and
+    https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/permissionset-calendarpermissionsettype
+    """
 
     # For simplicity, we implement the two distinct but equally names elements as one class.
     ELEMENT_NAME = 'PermissionSet'
@@ -951,7 +994,7 @@ class PermissionSet(EWSElement):
 
 
 class EffectiveRights(EWSElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/bb891883(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/effectiverights"""
     ELEMENT_NAME = 'EffectiveRights'
 
     FIELDS = [
@@ -970,8 +1013,46 @@ class EffectiveRights(EWSElement):
         return getattr(self, item, False)
 
 
+class DelegatePermissions(EWSElement):
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/delegatepermissions"""
+    PERMISSION_LEVEL_CHOICES = {
+            Choice('None'), Choice('Editor'), Choice('Reviewer'), Choice('Author'), Choice('Custom'),
+        }
+    FIELDS = [
+        ChoiceField('calendar_folder_permission_level', field_uri='CalendarFolderPermissionLevel',
+                    choices=PERMISSION_LEVEL_CHOICES, default='None'),
+        ChoiceField('tasks_folder_permission_level', field_uri='TasksFolderPermissionLevel',
+                    choices=PERMISSION_LEVEL_CHOICES, default='None'),
+        ChoiceField('inbox_folder_permission_level', field_uri='InboxFolderPermissionLevel',
+                    choices=PERMISSION_LEVEL_CHOICES, default='None'),
+        ChoiceField('contacts_folder_permission_level', field_uri='ContactsFolderPermissionLevel',
+                    choices=PERMISSION_LEVEL_CHOICES, default='None'),
+        ChoiceField('notes_folder_permission_level', field_uri='NotesFolderPermissionLevel',
+                    choices=PERMISSION_LEVEL_CHOICES, default='None'),
+        ChoiceField('journal_folder_permission_level', field_uri='JournalFolderPermissionLevel',
+                    choices=PERMISSION_LEVEL_CHOICES, default='None'),
+    ]
+
+    __slots__ = tuple(f.name for f in FIELDS)
+
+
+class DelegateUser(EWSElement):
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/delegateuser"""
+    ELEMENT_NAME = 'DelegateUser'
+    NAMESPACE = MNS
+
+    FIELDS = [
+        EWSElementField('user_id', field_uri='UserId', value_cls=UserId),
+        EWSElementField('delegate_permissions', field_uri='DelegatePermissions', value_cls=DelegatePermissions),
+        BooleanField('receive_copies_of_meeting_messages', field_uri='ReceiveCopiesOfMeetingMessages', default=False),
+        BooleanField('view_private_items', field_uri='ViewPrivateItems', default=False),
+    ]
+
+    __slots__ = tuple(f.name for f in FIELDS)
+
+
 class SearchableMailbox(EWSElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/jj191013(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/searchablemailbox"""
     ELEMENT_NAME = 'SearchableMailbox'
 
     FIELDS = [
@@ -988,7 +1069,7 @@ class SearchableMailbox(EWSElement):
 
 
 class FailedMailbox(EWSElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/jj191027(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/failedmailbox"""
     FIELDS = [
         CharField('mailbox', field_uri='Mailbox'),
         IntegerField('error_code', field_uri='ErrorCode'),
@@ -999,8 +1080,134 @@ class FailedMailbox(EWSElement):
     __slots__ = tuple(f.name for f in FIELDS)
 
 
+# MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/mailtipsrequested
+MAIL_TIPS_TYPES = (
+    'All',
+    'OutOfOfficeMessage',
+    'MailboxFullStatus',
+    'CustomMailTip',
+    'ExternalMemberCount',
+    'TotalMemberCount',
+    'MaxMessageSize',
+    'DeliveryRestriction',
+    'ModerationStatus',
+    'InvalidRecipient',
+)
+
+
+class OutOfOffice(EWSElement):
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/outofoffice"""
+    ELEMENT_NAME = 'OutOfOffice'
+
+    FIELDS = [
+        MessageField('reply_body', field_uri='ReplyBody'),
+        DateTimeField('start', field_uri='StartTime', is_required=False),
+        DateTimeField('end', field_uri='EndTime', is_required=False),
+    ]
+
+    __slots__ = tuple(f.name for f in FIELDS)
+
+    @classmethod
+    def duration_to_start_end(cls, elem, account):
+        kwargs = {}
+        duration = elem.find('{%s}Duration' % TNS)
+        if duration is not None:
+            for attr in ('start', 'end'):
+                f = cls.get_field_by_fieldname(attr)
+                kwargs[attr] = f.from_xml(elem=duration, account=account)
+        return kwargs
+
+    @classmethod
+    def from_xml(cls, elem, account):
+        kwargs = {}
+        for attr in ('reply_body',):
+            f = cls.get_field_by_fieldname(attr)
+            kwargs[attr] = f.from_xml(elem=elem, account=account)
+        kwargs.update(cls.duration_to_start_end(elem=elem, account=account))
+        cls._clear(elem)
+        return cls(**kwargs)
+
+
+class MailTips(EWSElement):
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/mailtips"""
+    ELEMENT_NAME = 'MailTips'
+    NAMESPACE = MNS
+
+    FIELDS = [
+        RecipientAddressField('recipient_address'),
+        ChoiceField('pending_mail_tips', field_uri='PendingMailTips', choices={Choice(c) for c in MAIL_TIPS_TYPES}),
+        EWSElementField('out_of_office', field_uri='OutOfOffice', value_cls=OutOfOffice),
+        BooleanField('mailbox_full', field_uri='MailboxFull'),
+        TextField('custom_mail_tip', field_uri='CustomMailTip'),
+        IntegerField('total_member_count', field_uri='TotalMemberCount'),
+        IntegerField('external_member_count', field_uri='ExternalMemberCount'),
+        IntegerField('max_message_size', field_uri='MaxMessageSize'),
+        BooleanField('delivery_restricted', field_uri='DeliveryRestricted'),
+        BooleanField('is_moderated', field_uri='IsModerated'),
+        BooleanField('invalid_recipient', field_uri='InvalidRecipient'),
+    ]
+
+    __slots__ = tuple(f.name for f in FIELDS)
+
+
+ENTRY_ID = 'EntryId'  # The base64-encoded PR_ENTRYID property
+EWS_ID = 'EwsId'  # The EWS format used in Exchange 2007 SP1 and later
+EWS_LEGACY_ID = 'EwsLegacyId'  # The EWS format used in Exchange 2007 before SP1
+HEX_ENTRY_ID = 'HexEntryId'  # The hexadecimal representation of the PR_ENTRYID property
+OWA_ID = 'OwaId'  # The OWA format for Exchange 2007 and 2010
+STORE_ID = 'StoreId'  # The Exchange Store format
+# IdFormat enum
+ID_FORMATS = (ENTRY_ID, EWS_ID, EWS_LEGACY_ID, HEX_ENTRY_ID, OWA_ID, STORE_ID)
+
+
+class AlternateId(EWSElement):
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/alternateid"""
+    ELEMENT_NAME = 'AlternateId'
+    FIELDS = [
+        CharField('id', field_uri='Id', is_required=True, is_attribute=True),
+        ChoiceField('format', field_uri='Format', is_required=True, is_attribute=True,
+                    choices={Choice(c) for c in ID_FORMATS}),
+        EmailAddressField('mailbox', field_uri='Mailbox', is_required=True, is_attribute=True),
+        BooleanField('is_archive', field_uri='IsArchive', is_required=False, is_attribute=True),
+    ]
+
+    __slots__ = tuple(f.name for f in FIELDS)
+
+    @classmethod
+    def response_tag(cls):
+        # This element is in TNS in the request and MNS in the response...
+        return '{%s}%s' % (MNS, cls.ELEMENT_NAME)
+
+
+class AlternatePublicFolderId(EWSElement):
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/alternatepublicfolderid"""
+    ELEMENT_NAME = 'AlternatePublicFolderId'
+    FIELDS = [
+        CharField('folder_id', field_uri='FolderId', is_required=True, is_attribute=True),
+        ChoiceField('format', field_uri='Format', is_required=True, is_attribute=True,
+                    choices={Choice(c) for c in ID_FORMATS}),
+    ]
+
+    __slots__ = tuple(f.name for f in FIELDS)
+
+
+class AlternatePublicFolderItemId(EWSElement):
+    """MSDN:
+    https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/alternatepublicfolderitemid
+    """
+    ELEMENT_NAME = 'AlternatePublicFolderItemId'
+    FIELDS = [
+        CharField('folder_id', field_uri='FolderId', is_required=True, is_attribute=True),
+        ChoiceField('format', field_uri='Format', is_required=True, is_attribute=True,
+                    choices={Choice(c) for c in ID_FORMATS}),
+        CharField('item_id', field_uri='ItemId', is_required=True, is_attribute=True),
+    ]
+
+    __slots__ = tuple(f.name for f in FIELDS)
+
+
 class IdChangeKeyMixIn(EWSElement):
-    # A class that has 'id' and 'changekey' fields which are actually attributes on ID element
+    """Base class for classes that have 'id' and 'changekey' fields which are actually attributes on ID element"""
     ID_ELEMENT_CLS = ItemId
 
     FIELDS = [
@@ -1019,18 +1226,21 @@ class IdChangeKeyMixIn(EWSElement):
 
     @classmethod
     def from_xml(cls, elem, account):
+        # The ID and changekey are actually in an 'ItemId' child element
         item_id, changekey = cls.id_from_xml(elem)
-        kwargs = {f.name: f.from_xml(elem=elem, account=account) for f in cls.supported_fields()}
+        kwargs = {
+            f.name: f.from_xml(elem=elem, account=account) for f in cls.FIELDS if f.name not in ('id', 'changekey')
+        }
         cls._clear(elem)
         return cls(id=item_id, changekey=changekey, **kwargs)
 
     def __eq__(self, other):
         if isinstance(other, tuple):
             return hash((self.id, self.changekey)) == hash(other)
-        return super(IdChangeKeyMixIn, self).__eq__(other)
+        return super().__eq__(other)
 
     def __hash__(self):
         # If we have an ID and changekey, use that as key. Else return a hash of all attributes
         if self.id:
             return hash((self.id, self.changekey))
-        return super(IdChangeKeyMixIn, self).__hash__()
+        return super().__hash__()

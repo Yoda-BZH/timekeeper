@@ -12,7 +12,7 @@ import sys
 import argparse
 
 ## Other
-from exchangelib import DELEGATE, IMPERSONATION, Account, Credentials, ServiceAccount, \
+from exchangelib import DELEGATE, IMPERSONATION, Account, Credentials, \
     Configuration, NTLM, GSSAPI, Build, Version, EWSDateTime, CalendarItem, EWSTimeZone
 
 

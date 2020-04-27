@@ -1,9 +1,7 @@
 import logging
 
-from six import string_types
-
 from .fields import IntegerField, EnumField, EnumListField, DateField, DateTimeField, EWSElementField, \
-    WEEKDAY_NAMES, MONTHS, WEEK_NUMBERS, WEEKDAYS, EXTRA_WEEKDAY_OPTIONS
+    MONTHS, WEEK_NUMBERS, WEEKDAYS
 from .properties import EWSElement, IdChangeKeyMixIn
 
 log = logging.getLogger(__name__)
@@ -21,47 +19,22 @@ def _week_number_to_str(week_number):
     return WEEK_NUMBERS[week_number - 1] if isinstance(week_number, int) else week_number
 
 
-class ExtraWeekdaysField(EnumListField):
-    def __init__(self, *args, **kwargs):
-        kwargs['enum'] = WEEKDAYS
-        super(ExtraWeekdaysField, self).__init__(*args, **kwargs)
-
-    def clean(self, value, version=None):
-        # Pass EXTRA_WEEKDAY_OPTIONS as single string or integer value
-        if isinstance(value, string_types):
-            if value not in EXTRA_WEEKDAY_OPTIONS:
-                raise ValueError(
-                    "Single value '%s' on field '%s' must be one of %s" % (value, self.name, EXTRA_WEEKDAY_OPTIONS))
-            value = [self.enum.index(value) + 1]
-        elif isinstance(value, self.value_cls):
-            value = [value]
-        else:
-            value = list(value)  # Convert to something we can index
-            for i, v in enumerate(value):
-                if isinstance(v, string_types):
-                    if v not in WEEKDAY_NAMES:
-                        raise ValueError(
-                            "List value '%s' on field '%s' must be one of %s" % (v, self.name, WEEKDAY_NAMES))
-                    value[i] = self.enum.index(v) + 1
-                elif isinstance(v, self.value_cls) and not 1 <= v <= 7:
-                    raise ValueError("List value '%s' on field '%s' must be in range 1 -> 7" % (v, self.name))
-        return super(ExtraWeekdaysField, self).clean(value, version=version)
-
-
 class Pattern(EWSElement):
+    """Base class for all classes implementing recurring pattern elements"""
     __slots__ = tuple()
 
 
 class AbsoluteYearlyPattern(Pattern):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa564242(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/absoluteyearlyrecurrence
+    """
     ELEMENT_NAME = 'AbsoluteYearlyRecurrence'
 
     FIELDS = [
-        # The month of the year, from 1 - 12
-        EnumField('month', field_uri='t:Month', enum=MONTHS, is_required=True),
         # The day of month of an occurrence, in range 1 -> 31. If a particular month has less days than the day_of_month
         # value, the last day in the month is assumed
-        IntegerField('day_of_month', field_uri='t:DayOfMonth', min=1, max=31, is_required=True),
+        IntegerField('day_of_month', field_uri='DayOfMonth', min=1, max=31, is_required=True),
+        # The month of the year, from 1 - 12
+        EnumField('month', field_uri='Month', enum=MONTHS, is_required=True),
     ]
 
     __slots__ = tuple(f.name for f in FIELDS)
@@ -71,41 +44,43 @@ class AbsoluteYearlyPattern(Pattern):
 
 
 class RelativeYearlyPattern(Pattern):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/bb204113(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/relativeyearlyrecurrence
+    """
     ELEMENT_NAME = 'RelativeYearlyRecurrence'
 
     FIELDS = [
-        # List of valid ISO 8601 weekdays, as list of numbers in range 1 -> 7 (1 being Monday). Alternatively, weekdays
-        # can be one of the DAY (or 8), WEEK_DAY (or 9) or WEEKEND_DAY (or 10) consts which is interpreted as the first
-        # day, weekday, or weekend day in the month, respectively.
-        ExtraWeekdaysField('weekdays', field_uri='t:DaysOfWeek', is_required=True),
+        # The weekday of the occurrence, as a valid ISO 8601 weekday number in range 1 -> 7 (1 being Monday).
+        # Alternatively, the weekday can be one of the DAY (or 8), WEEK_DAY (or 9) or WEEKEND_DAY (or 10) consts which
+        # is interpreted as the first day, weekday, or weekend day in the month, respectively.
+        EnumField('weekday', field_uri='DaysOfWeek', enum=WEEKDAYS, is_required=True),
         # Week number of the month, in range 1 -> 5. If 5 is specified, this assumes the last week of the month for
         # months that have only 4 weeks
-        EnumField('week_number', field_uri='t:DayOfWeekIndex', enum=WEEK_NUMBERS, is_required=True),
+        EnumField('week_number', field_uri='DayOfWeekIndex', enum=WEEK_NUMBERS, is_required=True),
         # The month of the year, from 1 - 12
-        EnumField('month', field_uri='t:Month', enum=MONTHS, is_required=True),
+        EnumField('month', field_uri='Month', enum=MONTHS, is_required=True),
     ]
 
     __slots__ = tuple(f.name for f in FIELDS)
 
     def __str__(self):
-        return 'Occurs on weekdays %s in the %s week of %s' % (
-            ', '.join(_weekday_to_str(i) for i in self.weekdays),
+        return 'Occurs on weekday %s in the %s week of %s' % (
+            _weekday_to_str(self.weekday),
             _week_number_to_str(self.week_number),
             _month_to_str(self.month)
         )
 
 
 class AbsoluteMonthlyPattern(Pattern):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa493844(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/absolutemonthlyrecurrence
+    """
     ELEMENT_NAME = 'AbsoluteMonthlyRecurrence'
 
     FIELDS = [
         # Interval, in months, in range 1 -> 99
-        IntegerField('interval', field_uri='t:Interval', min=1, max=99, is_required=True),
+        IntegerField('interval', field_uri='Interval', min=1, max=99, is_required=True),
         # The day of month of an occurrence, in range 1 -> 31. If a particular month has less days than the day_of_month
         # value, the last day in the month is assumed
-        IntegerField('day_of_month', field_uri='t:DayOfMonth', min=1, max=31, is_required=True),
+        IntegerField('day_of_month', field_uri='DayOfMonth', min=1, max=31, is_required=True),
     ]
 
     __slots__ = tuple(f.name for f in FIELDS)
@@ -115,48 +90,50 @@ class AbsoluteMonthlyPattern(Pattern):
 
 
 class RelativeMonthlyPattern(Pattern):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa564558(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/relativemonthlyrecurrence
+    """
     ELEMENT_NAME = 'RelativeMonthlyRecurrence'
 
     FIELDS = [
         # Interval, in months, in range 1 -> 99
-        IntegerField('interval', field_uri='t:Interval', min=1, max=99, is_required=True),
-        # List of valid ISO 8601 weekdays, as list of numbers in range 1 -> 7 (1 being Monday). Alternatively, weekdays
-        # can be one of the DAY (or 8), WEEK_DAY (or 9) or WEEKEND_DAY (or 10) consts which is interpreted as the first
-        # day, weekday, or weekend day in the month, respectively.
-        ExtraWeekdaysField('weekdays', field_uri='t:DaysOfWeek', is_required=True),
+        IntegerField('interval', field_uri='Interval', min=1, max=99, is_required=True),
+        # The weekday of the occurrence, as a valid ISO 8601 weekday number in range 1 -> 7 (1 being Monday).
+        # Alternatively, the weekday can be one of the DAY (or 8), WEEK_DAY (or 9) or WEEKEND_DAY (or 10) consts which
+        # is interpreted as the first day, weekday, or weekend day in the month, respectively.
+        EnumField('weekday', field_uri='DaysOfWeek', enum=WEEKDAYS, is_required=True),
         # Week number of the month, in range 1 -> 5. If 5 is specified, this assumes the last week of the month for
         # months that have only 4 weeks.
-        EnumField('week_number', field_uri='t:DayOfWeekIndex', enum=WEEK_NUMBERS, is_required=True),
+        EnumField('week_number', field_uri='DayOfWeekIndex', enum=WEEK_NUMBERS, is_required=True),
     ]
 
     __slots__ = tuple(f.name for f in FIELDS)
 
     def __str__(self):
-        return 'Occurs on weekdays %s in the %s week of every %s month(s)' % (
-            ', '.join(_weekday_to_str(i) for i in self.weekdays),
+        return 'Occurs on weekday %s in the %s week of every %s month(s)' % (
+            _weekday_to_str(self.weekday),
             _week_number_to_str(self.week_number),
             self.interval
         )
 
 
 class WeeklyPattern(Pattern):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa563500(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/weeklyrecurrence
+    """
     ELEMENT_NAME = 'WeeklyRecurrence'
 
     FIELDS = [
         # Interval, in weeks, in range 1 -> 99
-        IntegerField('interval', field_uri='t:Interval', min=1, max=99, is_required=True),
+        IntegerField('interval', field_uri='Interval', min=1, max=99, is_required=True),
         # List of valid ISO 8601 weekdays, as list of numbers in range 1 -> 7 (1 being Monday)
-        EnumListField('weekdays', field_uri='t:DaysOfWeek', enum=WEEKDAYS, is_required=True),
+        EnumListField('weekdays', field_uri='DaysOfWeek', enum=WEEKDAYS, is_required=True),
         # The first day of the week. Defaults to Monday
-        EnumField('first_day_of_week', field_uri='t:FirstDayOfWeek', enum=WEEKDAYS, default=1, is_required=True),
+        EnumField('first_day_of_week', field_uri='FirstDayOfWeek', enum=WEEKDAYS, default=1, is_required=True),
     ]
 
     __slots__ = tuple(f.name for f in FIELDS)
 
     def __str__(self):
-        if isinstance(self.weekdays, string_types):
+        if isinstance(self.weekdays, str):
             weekdays = [self.weekdays]
         elif isinstance(self.weekdays, int):
             weekdays = [_weekday_to_str(self.weekdays)]
@@ -168,12 +145,13 @@ class WeeklyPattern(Pattern):
 
 
 class DailyPattern(Pattern):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa563228(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/dailyrecurrence
+    """
     ELEMENT_NAME = 'DailyRecurrence'
 
     FIELDS = [
         # Interval, in days, in range 1 -> 999
-        IntegerField('interval', field_uri='t:Interval', min=1, max=999, is_required=True),
+        IntegerField('interval', field_uri='Interval', min=1, max=999, is_required=True),
     ]
 
     __slots__ = tuple(f.name for f in FIELDS)
@@ -183,63 +161,67 @@ class DailyPattern(Pattern):
 
 
 class Boundary(EWSElement):
+    """Base class for all classes implementing recurring boundary elements"""
     __slots__ = tuple()
 
 
 class NoEndPattern(Boundary):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa564699(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/noendrecurrence
+    """
     ELEMENT_NAME = 'NoEndRecurrence'
 
     FIELDS = [
         # Start date, as EWSDate
-        DateField('start', field_uri='t:StartDate', is_required=True),
+        DateField('start', field_uri='StartDate', is_required=True),
     ]
 
     __slots__ = tuple(f.name for f in FIELDS)
 
 
 class EndDatePattern(Boundary):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa564536(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/enddaterecurrence
+    """
     ELEMENT_NAME = 'EndDateRecurrence'
 
     FIELDS = [
         # Start date, as EWSDate
-        DateField('start', field_uri='t:StartDate', is_required=True),
+        DateField('start', field_uri='StartDate', is_required=True),
         # End date, as EWSDate
-        DateField('end', field_uri='t:EndDate', is_required=True),
+        DateField('end', field_uri='EndDate', is_required=True),
     ]
 
     __slots__ = tuple(f.name for f in FIELDS)
 
 
 class NumberedPattern(Boundary):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa580960(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/numberedrecurrence"""
     ELEMENT_NAME = 'NumberedRecurrence'
 
     FIELDS = [
         # Start date, as EWSDate
-        DateField('start', field_uri='t:StartDate', is_required=True),
+        DateField('start', field_uri='StartDate', is_required=True),
         # The number of occurrences in this pattern, in range 1 -> 999
-        IntegerField('number', field_uri='t:NumberOfOccurrences', min=1, max=999, is_required=True),
+        IntegerField('number', field_uri='NumberOfOccurrences', min=1, max=999, is_required=True),
     ]
 
     __slots__ = tuple(f.name for f in FIELDS)
 
 
 class Occurrence(IdChangeKeyMixIn):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa565603(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/occurrence"""
     ELEMENT_NAME = 'Occurrence'
 
-    FIELDS = IdChangeKeyMixIn.FIELDS + [
+    LOCAL_FIELDS = [
         # The modified start time of the item, as EWSDateTime
-        DateTimeField('start', field_uri='t:Start'),
+        DateTimeField('start', field_uri='Start'),
         # The modified end time of the item, as EWSDateTime
-        DateTimeField('end', field_uri='t:End'),
+        DateTimeField('end', field_uri='End'),
         # The original start time of the item, as EWSDateTime
-        DateTimeField('original_start', field_uri='t:OriginalStart'),
+        DateTimeField('original_start', field_uri='OriginalStart'),
     ]
+    FIELDS = IdChangeKeyMixIn.FIELDS + LOCAL_FIELDS
 
-    __slots__ = tuple(f.name for f in FIELDS)
+    __slots__ = tuple(f.name for f in LOCAL_FIELDS)
 
 
 # Container elements:
@@ -248,24 +230,24 @@ class Occurrence(IdChangeKeyMixIn):
 
 
 class FirstOccurrence(Occurrence):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa565661(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/firstoccurrence"""
     ELEMENT_NAME = 'FirstOccurrence'
     __slots__ = tuple()
 
 
 class LastOccurrence(Occurrence):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa565375(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/lastoccurrence"""
     ELEMENT_NAME = 'LastOccurrence'
     __slots__ = tuple()
 
 
 class DeletedOccurrence(EWSElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa566477(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/deletedoccurrence"""
     ELEMENT_NAME = 'DeletedOccurrence'
 
     FIELDS = [
         # The modified start time of the item, as EWSDateTime
-        DateTimeField('start', field_uri='t:Start'),
+        DateTimeField('start', field_uri='Start'),
     ]
 
     __slots__ = tuple(f.name for f in FIELDS)
@@ -277,7 +259,8 @@ BOUNDARY_CLASSES = NoEndPattern, EndDatePattern, NumberedPattern
 
 
 class Recurrence(EWSElement):
-    # MSDN: https://msdn.microsoft.com/en-us/library/office/aa580471(v=exchg.150).aspx
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/recurrence-recurrencetype
+    """
     ELEMENT_NAME = 'Recurrence'
 
     FIELDS = [
@@ -303,7 +286,7 @@ class Recurrence(EWSElement):
                 kwargs['boundary'] = NumberedPattern(start=start, number=number)
             else:
                 raise ValueError("Unsupported 'start', 'end', 'number' combination")
-        super(Recurrence, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
     @classmethod
     def from_xml(cls, elem, account):

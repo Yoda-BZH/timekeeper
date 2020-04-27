@@ -4,7 +4,7 @@ from .common import EWSAccountService, create_attachment_ids_element
 
 class DeleteAttachment(EWSAccountService):
     """
-    MSDN: https://msdn.microsoft.com/en-us/library/office/aa580782(v=exchg.150).aspx
+    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/deleteattachment-operation
     """
     SERVICE_NAME = 'DeleteAttachment'
 
@@ -17,7 +17,7 @@ class DeleteAttachment(EWSAccountService):
         # DeleteAttachment returns RootItemIds directly beneath DeleteAttachmentResponseMessage. Collect the elements
         # and make our own fake container.
         from ..properties import RootItemId
-        res = super(DeleteAttachment, self)._get_element_container(
+        res = super()._get_element_container(
             message=message, response_message=response_message, name=name
         )
         if not res:

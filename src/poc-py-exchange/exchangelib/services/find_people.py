@@ -1,8 +1,6 @@
 from collections import OrderedDict
 import logging
 
-from six import text_type
-
 from ..errors import MalformedResponseError, ErrorServerBusy
 from ..util import create_element, set_xml_value, xml_to_str, MNS
 from .common import EWSAccountService, PagingEWSMixIn, create_shape_element
@@ -12,7 +10,7 @@ log = logging.getLogger(__name__)
 
 class FindPeople(EWSAccountService, PagingEWSMixIn):
     """
-    MSDN: https://msdn.microsoft.com/en-us/library/office/jj191039(v=exchg.150).aspx
+    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/findpeople-operation
     """
     SERVICE_NAME = 'FindPeople'
     element_container_name = '{%s}People' % MNS
@@ -61,8 +59,8 @@ class FindPeople(EWSAccountService, PagingEWSMixIn):
         view_type = create_element(
             'm:IndexedPageItemView',
             attrs=OrderedDict([
-                ('MaxEntriesReturned', text_type(page_size)),
-                ('Offset', text_type(offset)),
+                ('MaxEntriesReturned', str(page_size)),
+                ('Offset', str(offset)),
                 ('BasePoint', 'Beginning'),
             ])
         )

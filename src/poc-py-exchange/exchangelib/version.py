@@ -1,16 +1,9 @@
-# coding=utf-8
-from __future__ import unicode_literals
-
 import logging
 import re
 
-from future.utils import python_2_unicode_compatible, PY2
-from six import text_type
-
 from .errors import TransportError, ErrorInvalidSchemaVersionForMailboxVersion, ErrorInvalidServerVersion, \
     ErrorIncorrectSchemaVersion, ResponseMessageError
-from .transport import get_auth_instance, DEFAULT_HEADERS
-from .util import is_xml, to_xml, TNS, SOAPNS, ParseError, CONNECTION_ERRORS
+from .util import xml_to_str, TNS
 
 log = logging.getLogger(__name__)
 
@@ -21,7 +14,7 @@ log = logging.getLogger(__name__)
 # 'shortname' comes from types.xsd and is the official version of the server, corresponding to the version numbers
 # supplied in SOAP headers. 'API version' is the version name supplied in the RequestServerVersion element in SOAP
 # headers and describes the EWS API version the server implements. Valid values for this element are described here:
-#    http://msdn.microsoft.com/en-us/library/bb891876(v=exchg.150).aspx
+#    https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/requestserverversion
 
 VERSIONS = {
     'Exchange2007': ('Exchange2007', 'Microsoft Exchange Server 2007'),
@@ -40,28 +33,17 @@ VERSIONS = {
     'Exchange2019': ('Exchange2019', 'Microsoft Exchange Server 2019'),
 }
 
-# Build a list of unique API versions, used when guessing API version supported by the server.  Use reverse order so we
+# Build a list of unique API versions, used when guessing API version supported by the server. Use reverse order so we
 # get the newest API version supported by the server.
 API_VERSIONS = sorted({v[0] for v in VERSIONS.values()}, reverse=True)
 
 
-class PickleMixIn(object):
-    if PY2:
-        def __getstate__(self):
-            return {k: getattr(self, k) for k in self.__slots__}
-
-        def __setstate__(self, state):
-            for k in self.__slots__:
-                setattr(self, k, state.get(k))
-
-
-@python_2_unicode_compatible
-class Build(PickleMixIn):
+class Build:
     """
     Holds methods for working with build numbers
     """
 
-    # List of build numbers here: https://technet.microsoft.com/en-gb/library/hh135098(v=exchg.150).aspx
+    # List of build numbers here: https://docs.microsoft.com/en-us/exchange/new-features/build-numbers-and-release-dates
     API_VERSION_MAP = {
         8: {
             0: 'Exchange2007',
@@ -86,12 +68,20 @@ class Build(PickleMixIn):
     __slots__ = ('major_version', 'minor_version', 'major_build', 'minor_build')
 
     def __init__(self, major_version, minor_version, major_build=0, minor_build=0):
+        if not isinstance(major_version, int):
+            raise ValueError("'major_version' must be an integer")
+        if not isinstance(minor_version, int):
+            raise ValueError("'minor_version' must be an integer")
+        if not isinstance(major_build, int):
+            raise ValueError("'major_build' must be an integer")
+        if not isinstance(minor_build, int):
+            raise ValueError("'minor_build' must be an integer")
         self.major_version = major_version
         self.minor_version = minor_version
         self.major_build = major_build
         self.minor_build = minor_build
         if major_version < 8:
-            raise ValueError("Exchange major versions below 8 don't support EWS (%s)" % text_type(self))
+            raise ValueError("Exchange major versions below 8 don't support EWS (%s)" % self)
 
     @classmethod
     def from_xml(cls, elem):
@@ -108,6 +98,24 @@ class Build(PickleMixIn):
                 raise ValueError()
             kwargs[k] = int(v)  # Also raises ValueError
         return cls(**kwargs)
+
+    @classmethod
+    def from_hex_string(cls, s):
+        """Parse a server version string as returned in an autodiscover response. The process is described here:
+        https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/serverversion-pox#example
+
+        The string is a hex string that, converted to a 32-bit binary, encodes the server version. The rules are:
+            * The first 4 bits contain the version number structure version. Can be ignored
+            * The next 6 bits contain the major version number
+            * The next 6 bits contain the minor version number
+            * The next bit contains a flag. Can be ignored
+            * The next 15 bits contain the major build number
+        """
+        bin_s = '{:032b}'.format(int(s, 16))  # Convert string to 32-bit binary string
+        major_version = int(bin_s[4:10], 2)
+        minor_version = int(bin_s[10:16], 2)
+        build_number = int(bin_s[17:32], 2)
+        return cls(major_version=major_version, minor_version=minor_version, major_build=build_number)
 
     def api_version(self):
         if EXCHANGE_2013_SP1 <= self < EXCHANGE_2016:
@@ -169,93 +177,60 @@ EXCHANGE_2013 = Build(15, 0)
 EXCHANGE_2013_SP1 = Build(15, 0, 847)
 EXCHANGE_2016 = Build(15, 1)
 EXCHANGE_2019 = Build(15, 2)
+EXCHANGE_O365 = Build(15, 20)
 
 
-@python_2_unicode_compatible
-class Version(PickleMixIn):
+class Version:
     """
     Holds information about the server version
     """
     __slots__ = ('build', 'api_version')
 
     def __init__(self, build, api_version=None):
+        if not isinstance(build, (Build, type(None))):
+            raise ValueError("'build' must be a Build instance")
         self.build = build
-        self.api_version = api_version
-        if self.build is not None and self.api_version is None:
+        if api_version is None:
             self.api_version = build.api_version()
+        else:
+            if not isinstance(api_version, str):
+                raise ValueError("'api_version' must be a string")
+            self.api_version = api_version
 
     @property
     def fullname(self):
         return VERSIONS[self.api_version][1]
 
     @classmethod
-    def guess(cls, protocol):
+    def guess(cls, protocol, api_version_hint=None):
         """
         Tries to ask the server which version it has. We haven't set up an Account object yet, so we generate requests
         by hand. We only need a response header containing a ServerVersionInfo element.
 
-        The types.xsd document contains a 'shortname' value that we can use as a key for VERSIONS to get the API version
-        that we need in SOAP headers to generate valid requests. Unfortunately, the Exchagne server may be misconfigured
-        to either block access to types.xsd or serve up a wrong version of the document. Therefore, we only use
-        'shortname' as a hint, but trust the SOAP version returned in response headers.
-
         To get API version and build numbers from the server, we need to send a valid SOAP request. We can't do that
         without a valid API version. To solve this chicken-and-egg problem, we try all possible API versions that this
-        package supports, until we get a valid response. If we managed to get a 'shortname' previously, we try the
-        corresponding API version first.
+        package supports, until we get a valid response.
         """
-        log.debug('Asking server for version info')
-        # We can't use a session object from the protocol pool for docs because sessions are created with service auth.
-        auth = get_auth_instance(credentials=protocol.credentials, auth_type=protocol.docs_auth_type)
-        try:
-            shortname = cls._get_shortname_from_docs(auth=auth, types_url=protocol.types_url)
-            log.debug('Shortname according to %s: %s', protocol.types_url, shortname)
-        except (TransportError, ParseError) as e:
-            log.info(text_type(e))
-            shortname = None
-        api_version = VERSIONS[shortname][0] if shortname else None
-        return cls._guess_version_from_service(protocol=protocol, hint=api_version)
-
-    @staticmethod
-    def _get_shortname_from_docs(auth, types_url):
-        # Get the server version from types.xsd. We can't necessarily use the service auth type since it may not be the
-        # same as the auth type for docs.
-        log.debug('Getting %s with auth type %s', types_url, auth.__class__.__name__)
-        # Some servers send an empty response if we send 'Connection': 'close' header
-        from .protocol import BaseProtocol
-        with BaseProtocol.raw_session() as s:
-            try:
-                r = s.get(url=types_url, headers=DEFAULT_HEADERS.copy(), auth=auth, allow_redirects=False,
-                          timeout=BaseProtocol.TIMEOUT)
-            except CONNECTION_ERRORS as e:
-                raise TransportError(str(e))
-        log.debug('Request headers: %s', r.request.headers)
-        log.debug('Response code: %s', r.status_code)
-        log.debug('Response headers: %s', r.headers)
-        log.debug('Response data: %s', r.content[:1000])
-        if r.status_code != 200:
-            raise TransportError('Unexpected HTTP %s when getting %s (%r)' % (r.status_code, types_url, r.content))
-        if not is_xml(r.content):
-            raise TransportError('Unexpected result when getting %s. Maybe this is not an EWS server?%s' % (
-                types_url,
-                '\n\n%r[...]' % r.content[:200] if len(r.content) > 200 else '\n\n%r' % r.content if r.content else '',
-            ))
-        return to_xml(r.content).getroot().get('version')
-
-    @classmethod
-    def _guess_version_from_service(cls, protocol, hint=None):
-        # The protocol doesn't have a version yet, so add one with our hint, or default to latest supported version.
+        from .services import ResolveNames
+        # The protocol doesn't have a version yet, so default to latest supported version if we don't have a hint.
+        api_version = api_version_hint or API_VERSIONS[0]
+        log.debug('Asking server for version info using API version %s', api_version)
+        # We don't know the build version yet. Hopefully, the server will report it in the SOAP header. Lots of
+        # places expect a version to have a build, so this is a bit dangerous, but passing a fake build around is also
+        # dangerous. Make sure the call to ResolveNames does not require a version build.
+        protocol.config.version = Version(build=None, api_version=api_version)
         # Use ResolveNames as a minimal request to the server to test if the version is correct. If not, ResolveNames
         # will try to guess the version automatically.
-        from .services import ResolveNames
-        protocol.version = Version(build=None, api_version=hint or API_VERSIONS[-1])
+        name = str(protocol.credentials) if protocol.credentials and str(protocol.credentials) else 'DUMMY'
         try:
-            list(ResolveNames(protocol=protocol).call(unresolved_entries=[protocol.credentials.username]))
+            list(ResolveNames(protocol=protocol).call(unresolved_entries=[name]))
         except (ErrorInvalidSchemaVersionForMailboxVersion, ErrorInvalidServerVersion, ErrorIncorrectSchemaVersion):
             raise TransportError('Unable to guess version')
         except ResponseMessageError:
             # We survived long enough to get a new version
             pass
+        if not protocol.version.build:
+            raise AttributeError('Protocol should have a build number at this point')
         return protocol.version
 
     @staticmethod
@@ -264,36 +239,37 @@ class Version(PickleMixIn):
         return re.match(r'V[0-9]{1,4}_.*', version)
 
     @classmethod
-    def from_response(cls, requested_api_version, bytes_content):
-        try:
-            header = to_xml(bytes_content).find('{%s}Header' % SOAPNS)
-            if header is None:
-                raise TransportError('No header in XML response (%r)' % bytes_content)
-        except ParseError:
-            raise TransportError('Unknown XML response (%r)' % bytes_content)
-
+    def from_soap_header(cls, requested_api_version, header):
         info = header.find('{%s}ServerVersionInfo' % TNS)
         if info is None:
-            raise TransportError('No ServerVersionInfo in response: %r' % bytes_content)
+            raise TransportError('No ServerVersionInfo in header: %r' % xml_to_str(header))
         try:
             build = Build.from_xml(elem=info)
         except ValueError:
-            raise TransportError('Bad ServerVersionInfo in response: %r' % bytes_content)
+            raise TransportError('Bad ServerVersionInfo in response: %r' % xml_to_str(header))
         # Not all Exchange servers send the Version element
         api_version_from_server = info.get('Version') or build.api_version()
         if api_version_from_server != requested_api_version:
             if cls._is_invalid_version_string(api_version_from_server):
                 # For unknown reasons, Office 365 may respond with an API version strings that is invalid in a request.
                 # Detect these so we can fallback to a valid version string.
-                log.info('API version "%s" worked but server reports version "%s". Using "%s"', requested_api_version,
-                         api_version_from_server, requested_api_version)
+                log.debug('API version "%s" worked but server reports version "%s". Using "%s"', requested_api_version,
+                          api_version_from_server, requested_api_version)
                 api_version_from_server = requested_api_version
             else:
-                # Work around a bug in Exchange that reports a bogus API version in the XML response. Trust server
-                # response except 'V2_nn' or 'V201[5,6]_nn_mm' which is bogus
+                # Trust API version from server response
                 log.info('API version "%s" worked but server reports version "%s". Using "%s"', requested_api_version,
                          api_version_from_server, api_version_from_server)
-        return cls(build, api_version_from_server)
+        return cls(build=build, api_version=api_version_from_server)
+
+    def __eq__(self, other):
+        if self.api_version != other.api_version:
+            return False
+        if self.build and not other.build:
+            return False
+        if other.build and not self.build:
+            return False
+        return self.build == other.build
 
     def __repr__(self):
         return self.__class__.__name__ + repr((self.build, self.api_version))
