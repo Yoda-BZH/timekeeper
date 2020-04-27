@@ -159,7 +159,7 @@
       requestedConf['visibility_' + key] = localStorage.getItem("visibility_" + key);
     }
 
-    Object.keys(requestedConf).forEach((key) => (requestedConf[key] === null) && delete requestedConf[key]);
+    Object.keys(requestedConf).forEach(function(key) { (requestedConf[key] === null) && delete requestedConf[key]; });
 
     configuration = {...defaultConfiguration, ...requestedConf};
 
