@@ -62,24 +62,31 @@ def calendarItemNormalize(item):
     """
     Normalize a supplied EWS calendar event object
     """
-    #print(item.start)
+    event = {
+      'type':  'exchange',
+      'uid': item.uid,
+      'title': item.subject,
+    }
     if item.start.astimezone(ews_timezone).strftime('%H%M%S') == "000000" and item.end.astimezone(ews_timezone).strftime("%H%M%S") == "000000":
-        return {
+        event.update({
             'start': item.start.strftime("%Y-%m-%d"), #ews_timezone.localize(item.start),
             'end':   item.end.strftime("%Y-%m-%d"), #).ews_timezone.localize(item.end),
-            'title': item.subject,
-            'uid':   item.uid
             #'rendering': 'background',
-        }
+        })
+    else:
+      event.update({
+          'start': item.start.isoformat(), #ews_timezone.localize(item.start),
+          'end':   item.end.isoformat(), #).ews_timezone.localize(item.end),
+          #'rendering': 'background',
+      })
 
-    return {
-        'start': item.start.isoformat(), #ews_timezone.localize(item.start),
-        'end':   item.end.isoformat(), #).ews_timezone.localize(item.end),
-        'title': item.subject,
-        'uid':   item.uid,
-        'type':  'exchange'
-        #'rendering': 'background',
-    }
+    #if item.is_all_day:
+    #  event.update({ 'allDay': True })
+
+    #if item.legacy_free_busy_status == 'OOF':
+    #  event.update({'rendering': 'background'})
+
+    return event
 
 # Initialize items list (duh)
 items = []
