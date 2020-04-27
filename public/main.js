@@ -76,6 +76,7 @@
     localStorage.setItem("showMaskedEvents",     sessionStorage.getItem("showMaskedEvents"      ));
     sessionStorage.clear();
   }
+
   function merge_options(obj1,obj2){
       var obj3 = {};
       for (var attrname in obj1)
@@ -96,6 +97,7 @@
       }
       return obj3;
   }
+
   function initialize(options, userPlugins)
   {
     plugins = userPlugins;
