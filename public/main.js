@@ -78,8 +78,14 @@
   }
   function merge_options(obj1,obj2){
       var obj3 = {};
-      for (var attrname in obj1) { obj3[attrname] = obj1[attrname]; }
-      for (var attrname in obj2) { obj3[attrname] = obj2[attrname]; }
+      for (var attrname in obj1)
+      {
+        obj1[attrname] != null && obj3[attrname] = obj1[attrname];
+      }
+      for (var attrname in obj2) 
+      { 
+        obj2[attrname] != null && obj3[attrname] = obj2[attrname]; 
+      }
       return obj3;
   }
   function initialize(options, userPlugins)
