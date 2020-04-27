@@ -984,7 +984,7 @@
 
     for(var i in events)
     {
-      event = events[i];
+      var event = events[i];
       //console.log('treating', event);
       if(event.allDay)
       {
