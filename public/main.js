@@ -289,7 +289,7 @@
         })
         .always(function()
         {
-          $('.fc-update_' + tksource + '-button').click();
+          $('.fc-update_redmine-button').click();
         })
         ;
 
