@@ -42,7 +42,8 @@ The user's browser does.
 * [bootstrap](https://getbootstrap.com/)
 * [Some bootstrap themes on bootswatch](https://www.bootstrapcdn.com/bootswatch/)
 * [Python exchangelib (to connect to exchange/owa/office365 calendars)](https://pypi.org/project/exchangelib/)
-* [memcached](https://memcached.org/)
+* [memcached](https://memcached.org/) for storing data in cache
+* [spectrum](http://bgrins.github.io/spectrum) for the `<input type="color">` polyfill for internet explorer
 
 ## Time entries cache
 
