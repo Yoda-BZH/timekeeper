@@ -297,6 +297,7 @@
         redmineObjCleanup();
       });
 
+      // fixme make this behaviour of hideable configurable, and not named-plugin specific
       btnHideExchangeEvent.bind('click', function(event)
       {
         event.preventDefault();
