@@ -280,7 +280,7 @@
           var newEntry = data;
           newEntry.color = configuration['color_redmine'];
           calendar.addEvent(newEntry);
-          $.notify('Nouvelle entrée Redmine créee.', notifyOptions.temporary);
+          $.notify('Nouvelle entrée Redmine créée.', notifyOptions.temporary);
         })
         .fail(function()
         {
