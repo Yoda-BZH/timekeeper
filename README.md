@@ -64,6 +64,21 @@ Redmine issue IDs and subjects are proposed in the autocompleter.
 
 Redmine entries can be resized or moved over the week after their creation.
 
+## Requirements
+
+* php7.4
+* memcached
+* php-memcached
+* python3, python3-oauthlib, python3-requests-oauthlib
+
+## Installation
+
+After getting the source, run :
+```
+composer install
+bin/console cache:clear --env=prod
+```
+
 ## FAQ
 
 * Can I access someone else's calendar ?
