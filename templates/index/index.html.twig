@@ -126,6 +126,15 @@
         <label title="Les &eacute;v&eacute;nements exchange sont masqu&eacute;s quand ils sont convertis en imputation redmine ou &agrave; la demande. Cette option permet de les afficher quand m&ecirc;me. Le changement de cette option n&eacute;cessite de rafra&icirc;chir les &eacute;v&eacute;nements exchange, ou d'attendre le prochain rafra&icirc;chissement automatique." class="custom-control-label" for="showMaskedEvents">Afficher &eacute;v&eacute;nements masqu&eacute;s</label>
       </div>
 
+      <div id="configuration-total-verbose" class="forl-group">
+        <label for="totalverbosity" title="Type de verbosité des totaux par jour">Type de verbosité des totaux par jour</label>
+        <select name="totalverbosity" id="totalverbosity">
+          <option value="simple">Simple</option>
+          <option value="normal">Normal</option>
+          <option value="verbose">Verbeux</option>
+        </select>
+      </div>
+
       <div class="form-group">
         <label title="L'application rafra&icirc;chit p&eacute;riodiquement les &eacute;v&eacute;nements des calendriers" for="refreshTimer">P&eacute;riode de rafra&icirc;chissement des donn&eacute;es (secondes)</label>
         <input class="form-control" type="number" id="refreshTimer" disabled />

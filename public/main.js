@@ -27,6 +27,7 @@
     gitlab: undefined,
     assigned: undefined,
     assigne: undefined,
+    totals: undefined,
   };
 
   var eventInfo = null;
@@ -144,6 +145,7 @@
       theme: "default",
       visibility___main: 'visible',
       color___main: "#62A7B0",
+      totalverbosity: "normal",
     }
 
     requestedConf = {
@@ -156,6 +158,7 @@
       showTooltips:         localStorage.getItem('showTooltips') === 'false' ? false : true,
       showMaskedEvents:     localStorage.getItem('showMaskedEvents') === 'true' ? true : false,
       theme:                localStorage.getItem('theme'),
+      totalverbosity:       localStorage.getItem('totalverbosity'),
     };
     Object.keys(requestedConf).forEach(function(key) { (requestedConf[key] === null) && delete requestedConf[key]; });
 
@@ -173,6 +176,7 @@
 
     //configuration = {...defaultConfiguration, ...requestedConf};
     configuration = merge_options(defaultConfiguration, requestedConf);
+    console.log(configuration);
 
     // theme list: https://www.bootstrapcdn.com/bootswatch/
     allowedThemes = {
@@ -241,6 +245,7 @@
     $('#refreshTimer').val(configuration.refresh);
     $('#showTooltips').prop('checked', configuration.showTooltips);
     $('#showMaskedEvents').prop('checked', configuration.showMaskedEvents);
+    $('#totalverbosity').val(configuration.totalverbosity);
 
     if(hasRedmine)
     {
@@ -573,7 +578,8 @@
 
     btnConfigurationSave.bind('click', function()
     {
-      var oldTheme = configuration.theme;
+      //var oldTheme = configuration.theme;
+      var oldConfiguration = Object.assign({}, configuration);
       localStorage.setItem("showWeekend",           configuration.showWeekend = $("#showWeekend").prop('checked'));
       localStorage.setItem("businessHourStart",     configuration.businessHourStart = $("#businessHourStart").val());
       localStorage.setItem("businessHourEnd",       configuration.businessHourEnd = $("#businessHourEnd").val());
@@ -582,6 +588,7 @@
       localStorage.setItem("showTooltips",          configuration.showTooltips = $("#showTooltips").prop('checked'));
       localStorage.setItem("showMaskedEvents",      configuration.showMaskedEvents = $("#showMaskedEvents").prop('checked'));
       localStorage.setItem("theme",                 configuration.theme = $("#themeName").children('option:selected').val());
+      localStorage.setItem("totalverbosity",        configuration.totalverbosity = $("#totalverbosity").children('option:selected').val());
       for(key in plugins)
       {
         localStorage.setItem("color_" + key, configuration['color_' + key] = $("#idColor_" + key).val());
@@ -613,18 +620,15 @@
         calendar.setOption('maxTime', "24:00");
       }
 
-      if(configuration.theme != oldTheme)
+      if(configuration.theme != oldConfiguration.theme)
       {
         setCustomTheme();
       }
 
-      for(var key in plugins)
+      if(configuration.totalverbosity != oldConfiguration.totalverbosity)
       {
-        if(configuration['visibility_' + key] != 'visible')
-        {
-          continue;
-        }
-        //$('.fc-update_' + key + '-button').click();
+        timeouts.totals && clearTimeout(timeouts.totals);
+        timeouts.totals = setTimeout(computeAccountedEntries, 3000);
       }
 
       // force setup of tooltip if needed;
@@ -938,7 +942,9 @@
       .always(function()
       {
         $($('.fc-update_' + this.tksource + '-button')[0]).removeAttr('disabled');
-        computeAccountedEntries();
+        //computeAccountedEntries();
+        timeouts.totals && clearTimeout(timeouts.totals);
+        timeouts.totals = setTimeout(computeAccountedEntries, 3000);
       })
       ;
     }
@@ -1061,7 +1067,7 @@
     {
       var event = events[i];
       //console.log('treating', event);
-      if(event.allDay)
+      if(event.extendedProps.type == '__main')
       {
         event.remove();
         continue;
@@ -1082,7 +1088,6 @@
       }
 
       var difference = (event.end - event.start) / 1000 / 60;
-      //console.log('difference', difference);
 
       var eventDate = event.start.getFullYear() + '-' + formatNumber(event.start.getMonth() + 1) + '-' + formatNumber(event.start.getDate());
       if(!accountedByDate[eventDate])
@@ -1091,16 +1096,20 @@
       }
       accountedByDate[eventDate] += difference;
 
-      if(!accountedByDateAndType[eventDate])
-      {
-        accountedByDateAndType[eventDate] = [];
-      }
 
-      if(!accountedByDateAndType[eventDate][event.extendedProps.type])
+      if(configuration.totalverbosity != "simple")
       {
-        accountedByDateAndType[eventDate][event.extendedProps.type] = 0;
+        if(!accountedByDateAndType[eventDate])
+        {
+          accountedByDateAndType[eventDate] = [];
+        }
+
+        if(!accountedByDateAndType[eventDate][event.extendedProps.type])
+        {
+          accountedByDateAndType[eventDate][event.extendedProps.type] = 0;
+        }
+        accountedByDateAndType[eventDate][event.extendedProps.type] += difference;
       }
-      accountedByDateAndType[eventDate][event.extendedProps.type] += difference;
     }
 
     //console.log('accounted', accountedByDate, accountedByDateAndType);
@@ -1109,10 +1118,10 @@
       //console.log('treating ', eventsDate);
       var sum = accountedByDate[eventsDate];
       var sumDetails = [];
-      for(var eventType in accountedByDateAndType[eventDate])
+      for(var eventType in accountedByDateAndType[eventsDate])
       {
-        //console.log('has to be show', accountedByDateAndType[eventDate][eventType]);
-        var sumForDateAndType = accountedByDateAndType[eventDate][eventType];
+        //console.log('has to be show', accountedByDateAndType[eventsDate][eventType]);
+        var sumForDateAndType = accountedByDateAndType[eventsDate][eventType];
         if(0 == sumForDateAndType)
         {
           continue;
@@ -1121,10 +1130,14 @@
         sumDetails.push(str);
       }
 
-      var mainStr = 'Total: ' + nicetime(sum) + ' - ' + sumDetails.join(', ');
+      var mainStr = 'Total: ' + nicetime(sum);
+      if(configuration.totalverbosity == "normal")
+      {
+        mainStr += ' - ' + sumDetails.join(', ');
+      }
       //console.log(mainStr, eventsDate);
 
-      var accountedEvent = {
+      calendar.addEvent({
         title: mainStr,
         start: eventsDate + 'T00:00:00',
         //end: eventsDate + 'T00:00:00',
@@ -1132,10 +1145,29 @@
         extendedProps: { type: '__main', },
         color: configuration['color___main'],
         classNames: ['fc-title-allday'],
-      };
-      //console.log('event added', accountedEvent);
-      var r = calendar.addEvent(accountedEvent);
-      //console.log(r);
+      });
+
+      if(configuration.totalverbosity == "verbose")
+      {
+        for(var eventType in accountedByDateAndType[eventsDate])
+        {
+          if(0 == sumForDateAndType)
+          {
+            continue;
+          }
+          var str = plugins[eventType].name + ': ' + nicetime(sumForDateAndType);
+          //console.log("details", sumDetails[j]);
+          calendar.addEvent({
+            title: str,
+            start: eventsDate + 'T00:00:00',
+            allDay: true,
+            extendedProps: { type: '__main', },
+            color: configuration['color_' + eventType],
+            classNames: ['fc-title-allday'],
+          });
+
+        }
+      }
     }
     //console.log('accounted done');
     return true;
