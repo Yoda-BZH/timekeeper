@@ -1151,6 +1151,7 @@
       {
         for(var eventType in accountedByDateAndType[eventsDate])
         {
+          var sumForDateAndType = accountedByDateAndType[eventsDate][eventType];
           if(0 == sumForDateAndType)
           {
             continue;
