@@ -11,6 +11,6 @@ class Gitlab extends Metabase implements ConnectorInterface {
   
   public function get(string $start, string $end, bool $force = false)
   {
-    return array();
+    return $this->metabase($start, $end, $force);
   }
 }
