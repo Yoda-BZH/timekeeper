@@ -221,6 +221,10 @@ class MetaBaseEntryManager {
 
     foreach($this->entries as $k => $e)
     {
+      if(!$e)
+      {
+        continue;
+      }
       if($e['oid'] != $this->entries[$id]['oid'])
       {
         continue;
