@@ -1017,6 +1017,8 @@
     $.post('/api/' + info.event.extendedProps.type + '/timeentry-update', postData, function(data, status, xhr)
     {
       // todo
+      timeouts.totals && clearTimeout(timeouts.totals);
+      timeouts.totals = setTimeout(computeAccountedEntries, 3000);
     })
     .fail(function()
     {
