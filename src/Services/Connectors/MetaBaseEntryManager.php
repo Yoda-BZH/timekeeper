@@ -107,6 +107,10 @@ class MetaBaseEntryManager {
     {
       $entry['start'] = $lastEntry;
     }
+    if($entry['spent_time'] < 0)
+    {
+      $entry['spent_time'] = 0;
+    }
     //$end->add(new DateInterval('PT'.round($entry['spent_time'] * 60 ).'M'));
     $entry['end']->modify('+ '.$entry['spent_time'].' minutes');
     $comment = $entry['comments'];
@@ -198,6 +202,12 @@ class MetaBaseEntryManager {
 
   public function consolidate($id)
   {
+    if($this->entries[$id]['type'] == 'gitlab' && $this->entries[$id]['spent'] <= 0)
+    {
+      $this->entries[$id] = false;
+      return;
+    }
+
     if($this->entries[$id]['type'] != 'otrs')
     {
       return;
@@ -233,7 +243,7 @@ class MetaBaseEntryManager {
       $this->entries[$k]['end']->modify('+ '.$this->entries[$id]['spent'].' minutes');
 
       $this->entries[$id] = false;
-      return;
+      //return;
     }
 
     return;
