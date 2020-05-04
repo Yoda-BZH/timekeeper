@@ -44,7 +44,7 @@ The user's browser does.
 * [Python exchangelib (to connect to exchange/owa/office365 calendars)](https://pypi.org/project/exchangelib/)
 * [memcached](https://memcached.org/) for storing data in cache
 * [spectrum](http://bgrins.github.io/spectrum) for the `<input type="color">` polyfill for internet explorer
-* [iconfinder][https://www.iconfinder.com/icons/2867879/clock_icon] for the favicon
+* [iconfinder](https://www.iconfinder.com/icons/2867879/clock_icon) for the favicon
 
 ## Time entries cache
 
