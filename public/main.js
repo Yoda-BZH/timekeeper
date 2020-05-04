@@ -462,6 +462,17 @@
       header.right.push(key);
     }
 
+    var customGithubButton = {
+      openGithub: {
+        text: "Github",
+        click: function()
+        {
+          window.open("https://github.com/Yoda-BZH/timekeeper/");
+        },
+      }
+    }
+    header.right.push('openGithub');
+
     var customButtonBurger = {
       openBurgerMenu: {
         text: "☰",
@@ -479,6 +490,7 @@
     var customButtons = merge_options(customButtonsUpdate, customButtonsToggle);
     customButtons = merge_options(customButtons, actionsUserCustomButtons);
     customButtons = merge_options(customButtons, otherUserCustomButtons);
+    customButtons = merge_options(customButtons, customGithubButton);
     customButtons = merge_options(customButtons, customButtonBurger);
     //console.log(customButtons);
 
