@@ -438,7 +438,7 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
       
       if($issueEl->isHit())
       {
-        $issue = $issueEL->get();
+        $issue = $issueEl->get();
         !isset($ret[$terms]) && $ret[$terms] = array();
         $ret[$terms][$issue['id']] = array('rid' => $issue['id'], 'label' => sprintf('#%d - %s', $issue['id'], $issue['subject']));
       }
