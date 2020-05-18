@@ -183,6 +183,12 @@ class Exchange extends AbstractConnector implements ConnectorInterface
     {
       $d = new \DateTime($entry['start']);
       $d->setTimezone($tz);
+      $e = new \DateTime($entry['end']);
+      $e->setTimezone($tz);
+      if($d->format('His') == '000000' && $e->format('His') == '000000')
+      {
+        $entries[$k]['allDay'] = true;
+      }
       
       /**
        * per user and per user preference

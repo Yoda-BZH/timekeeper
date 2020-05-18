@@ -35,7 +35,6 @@ server        = args.server
 user_password = input("")
 
 # Setup exchangelib necessary objects
-ews_timezone      = EWSTimeZone.timezone('Europe/Paris')
 ews_credentials   = Credentials(user_login, user_password)
 ews_configuration = Configuration(server=server, credentials=ews_credentials)
 
@@ -67,18 +66,11 @@ def calendarItemNormalize(item):
       'uid': item.uid,
       'title': item.subject,
     }
-    if item.start.astimezone(ews_timezone).strftime('%H%M%S') == "000000" and item.end.astimezone(ews_timezone).strftime("%H%M%S") == "000000":
-        event.update({
-            'start': item.start.strftime("%Y-%m-%d"), #ews_timezone.localize(item.start),
-            'end':   item.end.strftime("%Y-%m-%d"), #).ews_timezone.localize(item.end),
-            #'rendering': 'background',
-        })
-    else:
-      event.update({
-          'start': item.start.isoformat(), #ews_timezone.localize(item.start),
-          'end':   item.end.isoformat(), #).ews_timezone.localize(item.end),
-          #'rendering': 'background',
-      })
+    event.update({
+        'start': item.start.isoformat(), #ews_timezone.localize(item.start),
+        'end':   item.end.isoformat(), #).ews_timezone.localize(item.end),
+        #'rendering': 'background',
+    })
 
     #if item.is_all_day:
     #  event.update({ 'allDay': True })
