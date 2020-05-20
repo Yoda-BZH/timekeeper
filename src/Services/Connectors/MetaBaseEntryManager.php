@@ -221,7 +221,7 @@ class MetaBaseEntryManager {
 
     foreach($this->entries as $k => $e)
     {
-      if(!$e)
+      if(!$e ||!$this->entries[$id])
       {
         continue;
       }
