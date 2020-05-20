@@ -16,3 +16,6 @@ framework:
         log: true
     cache:
         app: cache.adapter.memcached
+
+    assets:
+        version: 'v2'
