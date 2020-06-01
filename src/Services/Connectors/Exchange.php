@@ -201,7 +201,7 @@ class Exchange extends AbstractConnector implements ConnectorInterface
        */
       $md5 = \md5($d->format(\DateTime::ISO8601));
       
-      $entryMaskedStatus = $this->cache->getItem('exchange_hide_' . $user . '_'.$entry['uid'] . $md5);
+      $entryMaskedStatus = $this->cache->getItem('exchange_hide_' . $user . '_' . strtr($entry['uid'], '{}()/\\@:\"', '---------') . $md5);
       if($showMasked == false && isset($entry['uid']) && $entryMaskedStatus->isHit() && $entryMaskedStatus->get() == true)
       {
         // user asked to hide this one, deleting from the response
@@ -226,7 +226,7 @@ class Exchange extends AbstractConnector implements ConnectorInterface
       throw new \Exception('No uid to hide was provided');
     }
 
-    $uid = $args['uid'];
+    $uid = strtr($args['uid'], '{}()/\\@:\"', '---------');
     $args['start'] = $this->cleanupDatetime($args['start']);
     $start = new \Datetime($args['start']);
     $tz = new \DateTimeZone('Europe/Paris');

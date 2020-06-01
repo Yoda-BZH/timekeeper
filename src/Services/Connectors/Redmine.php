@@ -333,7 +333,7 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
 
     if(isset($args['uid']) && $args['uid'] != '')
     {
-      $key = 'exchange_hide_' . $this->user->getUsername() . '_'.$args['uid'] . md5($start->format(\DateTime::ISO8601));
+      $key = 'exchange_hide_' . $this->user->getUsername() . '_' . strtr($args['uid'], '{}()/\\@:\"', '---------') . md5($start->format(\DateTime::ISO8601));
       $exchangeToHide = $this->cache->getItem($key);
       $exchangeToHide->set('1');
       $this->cache->save($exchangeToHide);
