@@ -141,6 +141,7 @@
       showOnlyBusinessHour: false,
       refresh: 600, // seconds
       showTooltips: true,
+      showColumnLayout: false,
       showMaskedEvents: false,
       theme: "default",
       visibility___main: 'visible',
@@ -159,6 +160,7 @@
       showMaskedEvents:     localStorage.getItem('showMaskedEvents') === 'true' ? true : false,
       theme:                localStorage.getItem('theme'),
       totalverbosity:       localStorage.getItem('totalverbosity'),
+      showColumnLayout:     (localStorage.getItem('showColumnLayout') === 'false' || localStorage.getItem('showColumnLayout') === null) ? false : true,
     };
     Object.keys(requestedConf).forEach(function(key) { (requestedConf[key] === null) && delete requestedConf[key]; });
 
@@ -246,6 +248,7 @@
     $('#showTooltips').prop('checked', configuration.showTooltips);
     $('#showMaskedEvents').prop('checked', configuration.showMaskedEvents);
     $('#totalverbosity').val(configuration.totalverbosity);
+    $('#showColumnLayout').prop('checked', configuration.showColumnLayout);
 
     if(hasRedmine)
     {
@@ -609,6 +612,7 @@
       localStorage.setItem("showTooltips",          configuration.showTooltips = $("#showTooltips").prop('checked'));
       localStorage.setItem("showMaskedEvents",      configuration.showMaskedEvents = $("#showMaskedEvents").prop('checked'));
       localStorage.setItem("theme",                 configuration.theme = $("#themeName").children('option:selected').val());
+      localStorage.setItem("showColumnLayout",      configuration.showTooltips = $("#showColumnLayout").prop('checked'));
       localStorage.setItem("totalverbosity",        configuration.totalverbosity = $("#totalverbosity").children('option:selected').val());
       for(key in plugins)
       {
@@ -673,6 +677,10 @@
 
     setThemeInConfiguration();
     setCustomTheme();
+    if(configuration.showColumnLayout)
+    {
+        ApplyColumnLayout();
+    }
 
     $("#loading-timekeeper").remove();
   }

@@ -34,6 +34,7 @@
     <script src="{{ asset('js/bgrins-spectrum-98454b5/spectrum.js') }}"></script>
 
     <script src="{{ asset('main.js') }}"></script>
+    <script src="{{ asset('layout.js') }}"></script>
     <script>
 {% include 'index/timekeeper-config.js.twig' %}
     </script>
@@ -119,6 +120,11 @@
       <div id="configuration-showTooltips" class="custom-control custom-checkbox">
         <input class="custom-control-input" type="checkbox" id="showTooltips" />
         <label class="custom-control-label" for="showTooltips">Afficher les bulles d'aides (tooltips)</label>
+      </div>
+
+      <div class="custom-control custom-checkbox">
+        <input class="custom-control-input" type="checkbox" id="showColumnLayout" />
+        <label class="custom-control-label" for="showColumnLayout">Afficher la disposition en colonne</label>
       </div>
 
       <div id="configuration-showMaskedEvents" class="custom-control custom-checkbox">
