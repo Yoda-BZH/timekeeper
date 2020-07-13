@@ -504,9 +504,10 @@
     //console.log(customButtons);
 
     calendarOptions = {
+      schedulerLicenseKey: 'GPL-My-Project-Is-Open-Source',
       themeSystem: 'bootstrap',
       locale: 'fr',
-      defaultView: 'timeGridWeek',
+      initialView: 'timeGridWeek',
       // duree minimale d'une tache
       slotDuration: '00:15:00',
 
@@ -536,10 +537,10 @@
       height: 'parent',
       // commence le lundi
       firstDay: 1,
-      //minTime: '07:00:00',
-      //minTime: '00:00:00',
-      //maxTime: '24:00:00',
-      //maxTime: '19:00:00',
+      //slotMinTime: '07:00:00',
+      //slotMinTime: '00:00:00',
+      //slotMaxTime: '24:00:00',
+      //slotMaxTime: '19:00:00',
       // affichage des numeros de la semaine
       weekNumbers: true,
       //navLinks: true,
@@ -563,11 +564,11 @@
           window.open(info.event.url);
         }
       },
-      datesRender: displayDate,
+      datesSet: displayDate,
       rerenderDelay: 100,
       customButtons: customButtons,
-      header: header,
-      eventRender: function(info)
+      headerToolbar: header,
+      eventContent: function(info)
       {
         var targetStatus = configuration['visibility_' + info.event.extendedProps.type];
         //console.log('status must be ', targetStatus, '#visility-' + info.event.extendedProps.type);
@@ -585,13 +586,13 @@
     if(initialDate)
     {
       //console.log('loading custom date', initialDate);
-      calendarOptions.defaultDate = initialDate;
+      calendarOptions.initialDate = initialDate;
     }
 
     if(configuration.showOnlyBusinessHour)
     {
-      calendarOptions.minTime = calendarOptions.businessHours[0].startTime;
-      calendarOptions.maxTime = calendarOptions.businessHours[0].endTime;
+      calendarOptions.slotMinTime = calendarOptions.businessHours[0].startTime;
+      calendarOptions.slotMaxTime = calendarOptions.businessHours[0].endTime;
     }
 
     var calendarEl = document.getElementById('calendar');
@@ -632,13 +633,13 @@
       calendar.setOption('weekends', configuration.showWeekend);
       if(configuration.showOnlyBusinessHour)
       {
-        calendar.setOption('minTime', calendarOptions.businessHours[0].startTime);
-        calendar.setOption('maxTime', calendarOptions.businessHours[0].endTime);
+        calendar.setOption('slotMinTime', calendarOptions.businessHours[0].startTime);
+        calendar.setOption('slotMaxTime', calendarOptions.businessHours[0].endTime);
       }
       else
       {
-        calendar.setOption('minTime', "00:00");
-        calendar.setOption('maxTime', "24:00");
+        calendar.setOption('slotMinTime', "00:00");
+        calendar.setOption('slotMaxTime', "24:00");
       }
 
       if(configuration.theme != oldConfiguration.theme)
