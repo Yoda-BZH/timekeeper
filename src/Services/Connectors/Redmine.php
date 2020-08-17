@@ -92,7 +92,11 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
       //$r = \curl_exec($curlRid);
       $r = $this->jsonCall($url);
       $userInfos = \json_decode($r['data'], true);
-      $redmineUserId = $userInfos['user']['id'];
+      $redmineUserId = (int) $userInfos['user']['id'];
+      if(!$redmineUserId)
+      {
+        throw new \Exception('Unable to find redmine uid for ' . $user . '. curl; ' . print_r($r, true));
+      }
       $redmineUserIdEl->set($redmineUserId);
       $this->cache->save($redmineUserIdEl);
     }
