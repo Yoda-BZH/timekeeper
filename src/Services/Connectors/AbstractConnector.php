@@ -104,7 +104,7 @@ abstract class AbstractConnector
     
     $authentication = \sprintf('%s:%s', $this->user->getUsername(), $this->password);
     
-    \curl_setopt($curl, CURLOPT_URL ,$url);
+    \curl_setopt($curl, CURLOPT_URL, $url);
     \curl_setopt($curl, CURLOPT_USERPWD, $authentication);
     \curl_setopt($curl, CURLOPT_HEADER, false);
     \curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
