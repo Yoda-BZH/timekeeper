@@ -11,12 +11,12 @@ class MetaBaseEntryManager {
   public $type = '';
   protected $tz;
   private $endpoint;
-  
+
   public function __construct(\DateTimeZone $tz)
   {
     $this->tz = $tz;
   }
-  
+
   public function getLastEntry($entry)
   {
     $dayFormat = $entry['end']->format('Y-m-d');
@@ -100,7 +100,13 @@ class MetaBaseEntryManager {
   {
     global $lastEntryForDay;
 
-    $entry['start'] = new \Datetime($entry['spent_date'].' 08:00:00');
+    // generally datetimes returned are day only, starting at midnight.
+    $entry['start'] = new \Datetime($entry['spent_date']);
+    if($entry['start']->format('Hi') == '0000')
+    {
+      // so start the day at 8. Should be user-defined preference
+      $entry['start']->modify('+ 8 hours');
+    }
     $dayFormat = $entry['start']->format('Y-m-d');
     $entry['end'] = clone $entry['start'];
     if ($lastEntry = $this->getLastEntry($entry))
