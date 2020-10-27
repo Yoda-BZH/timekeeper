@@ -131,6 +131,12 @@
         autoHide: false,
         style: 'bootstrap',
       },
+      error: {
+        className: 'error',
+      },
+      success: {
+        className: 'success',
+      },
     };
 
     defaultConfiguration = {
@@ -285,12 +291,12 @@
           var newEntry = data;
           newEntry.color = configuration['color_redmine'];
           calendar.addEvent(newEntry);
-          $.notify('Nouvelle entrée Redmine créée.', notifyOptions.temporary);
+          $.notify('Nouvelle entrée Redmine créée.', merge_options(notifyOptions.temporary, notifyOptions.success));
         })
         .fail(function()
         {
           //alert('Impossible de créer l\'entrées');
-          $.notify('Impossible de créer l\'entrées', notifyOptions.permanent);
+          $.notify('Impossible de créer l\'entrées', merge_options(notifyOptions.permanent, notifyOptions.error));
         })
         .always(function()
         {
