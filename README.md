@@ -17,7 +17,7 @@ Otrs, on the other hand, stores date and time.
 
 All entries are display in a visual calendar.
 
-Some time-entries can be converted in Redmine time-entries, such as Exchange / 
+Some time-entries can be converted in Redmine time-entries, such as Exchange /
 Office365 calendar entries.
 
 ## Authentication
@@ -26,7 +26,7 @@ Is uses Ldap/Active Directory to identify a user.
 
 Once authenticated, the browser automatically sends the credentials for the
 appropriate requests.
-Those credentials are then sent to different API to fetch time-entries in 
+Those credentials are then sent to different API to fetch time-entries in
 third-party applications such as Redmine, or Metabase.
 
 Credentials (user and password) are NOT stored by TimeKeeper IN ANY WAY.
@@ -64,6 +64,18 @@ Once converted, the exchange event is hidden.
 Redmine issue IDs and subjects are proposed in the autocompleter.
 
 Redmine entries can be resized or moved over the week after their creation.
+
+If needed, redmine activities can be managed.
+
+In the `config/services.yaml`, use the `$useActivity` feature flag, and set it
+to `true`:
+
+```yaml
+    App\Services\Connectors\Redmine:
+        arguments:
+            $redmineUrl: 'https://redmine.example.com'
+            $useActivity: true
+```
 
 ## Requirements
 
@@ -150,7 +162,7 @@ return array(
 * What is metabase ?
 
 It is a BI tool.
-See [https://www.metabase.com/](https://www.metabase.com/) or 
+See [https://www.metabase.com/](https://www.metabase.com/) or
 [https://github.com/metabase/metabase](https://github.com/metabase/metabase)
 
 * Why do you use it ?
