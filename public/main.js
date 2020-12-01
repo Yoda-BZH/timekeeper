@@ -935,6 +935,10 @@
         {
           redmineActivities.attr('disabled', 'disabled');
         }
+        else
+        {
+          redmineActivities.removeAttr('disabled');
+        }
       }
     });
   }
