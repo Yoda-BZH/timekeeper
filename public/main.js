@@ -922,12 +922,14 @@
     var redmineId = redmineObj.val();
     $.getJSON('/api/redmine/activities', {'redmineId': redmineId}, function(activities)
     {
+      redmineActivities.empty();
       for(var activityKey in activities)
       {
         var activity = activities[activityKey];
         var selectOption = new Option(activity['name'], activity['id'])
         redmineActivities.append(selectOption);
       }
+
       if(activities.length)
       {
         redmineActivityForm.show();
