@@ -510,6 +510,10 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
 
   public function projectActivities(array $get)
   {
+    if(!$this->useActivity)
+    {
+      return array();
+    }
     $redmineId = $get['redmineId'];
     $issueCache = $this->cache->getItem('redmine_'.$redmineId);
     if(!$issueCache->isHit())
