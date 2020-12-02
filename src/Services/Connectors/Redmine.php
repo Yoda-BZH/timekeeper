@@ -4,57 +4,64 @@ namespace App\Services\Connectors;
 use Symfony\Contracts\Cache\CacheInterface;
 
 class Redmine extends AbstractConnector implements ConnectorInterface {
-  
+
   private $cache = null;
+  private $useActivity = false;
   protected $actions = array(
     'assigned' => array(
-      'GET', 
+      'GET',
       'assigned',
     ),
     'assign' => array(
-      'GET', 
+      'GET',
       'assign',
     ),
     'add' => array(
-      'POST', 
-      'add', 
-      array('start', 'end', 'comment', 'rid', 'uid')
+      'POST',
+      'add',
+      array('start', 'end', 'comment', 'rid', 'uid', 'activity')
     ),
     'timeentry-update' => array(
-      'POST', 
-      'update', 
+      'POST',
+      'update',
       array('teid', 'start', 'end', 'comment', 'rid')
     ),
     'autocomplete' => array(
-      'GET', 
-      'autocomplete', 
+      'GET',
+      'autocomplete',
       array('term')
     ),
+    'activities' => array(
+      'GET',
+      'projectActivities',
+      array('redmineId'),
+    ),
   );
-  
+
   private $redmineBaseUrl = '';
 
-  public function __construct(CacheInterface $cache, string $redmineUrl)
+  public function __construct(CacheInterface $cache, string $redmineUrl, bool $useActivity = false)
   {
     $this->cache = $cache;
     $this->redmineBaseUrl = $redmineUrl;
+    $this->useActivity = $useActivity;
   }
-  
+
   protected function generateUrl($id)
   {
     return $this->redmineBaseUrl. '/issues/' . $id;
   }
-  
+
   public function getRedmineBaseUrl()
   {
     return $this->redmineBaseUrl;
   }
-  
+
   public function getName()
   {
     return 'redmine';
   }
-  
+
   public function get(string $start, string $end, bool $force = false)
   {
     $tz = $this->getTimezone();
@@ -68,15 +75,15 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
     $endDate->setTimezone($tz);
 
     $user = $this->user->getUsername();
-    
+
     $curDate = clone $startDate;
     $cumulated = array();
-    
+
     //return array('fake' => 'data');
 
     $cacheRedmineUserId = 'redmine_uid_'.$user;
     $redmineUserIdEl = $this->cache->getItem($cacheRedmineUserId);
-    
+
     if($redmineUserIdEl->isHit())
     {
       $redmineUserId = $redmineUserIdEl->get();
@@ -84,12 +91,7 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
     else
     {
       $url = $this->getRedmineBaseUrl() . '/users/current.json';
-      //$curlRid = \curl_init();
-      //\curl_setopt($curlRid, CURLOPT_URL ,$url);
-      //\curl_setopt($curlRid, CURLOPT_USERPWD, $user.':'.$this->password);
-      //\curl_setopt($curlRid, CURLOPT_HEADER, false);
-      //\curl_setopt($curlRid, CURLOPT_RETURNTRANSFER, true);
-      //$r = \curl_exec($curlRid);
+
       $r = $this->jsonCall($url);
       $userInfos = \json_decode($r['data'], true);
       $redmineUserId = $userInfos['user']['id'];
@@ -99,23 +101,19 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
     //header('X-Redmine-user-ID: '.$redmineUserId);
 
     $this->cacheKey = $user.'_redmine_'.$startDate->format('Ymd');
-    //$cachedRedmine = $this->cache->delete($this->cacheKey);
+
     $cachedRedmineEl = $this->cache->getItem($this->cacheKey);
     if(!$force && $cachedRedmineEl->isHit())
     {
-      //header('X-Data-Cached: 1');
-      //echo json_encode($cachedRedmine);
       return $cachedRedmineEl->get();
-      //exit(0);
     }
-    //header('X-Data-Cached: 0');
 
     $url = $this->getRedmineBaseUrl() . '/time_entries.json?user_id='.$redmineUserId.'&period_type=2&from='.$startDate->format('Y-m-d').'&to='.$endDate->format('Y-m-d').'&limit=100';
 
     $r = $this->jsonCall($url);
 
     $timeEntries = json_decode($r['data'], true);
-    
+
     if(!isset($timeEntries['time_entries']))
     {
       $timeEntries['time_entries'] = array();
@@ -162,7 +160,7 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
       $lastEntryPerDay[$dayFormat] = clone $end;
 
       $cachedIssueEl = $this->cache->getItem('redmine_'.$timeEntry['issue']['id']);
-      
+
       if($cachedIssueEl->isHit())
       {
         $cachedIssue = $cachedIssueEl->get();
@@ -201,12 +199,12 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
     $cachedRedmineEl->set($entries);
     $cachedRedmineEl->expiresAfter($expiration = 600);
     $r = $this->cache->save($cachedRedmineEl);
-    
+
     if(!$r)
     {
       return array();
     }
-    
+
     return $entries;
   }
 
@@ -225,12 +223,12 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
   {
     $user = $this->user->getUsername();
     $cacheEl = $this->cache->getItem('redmine_'.$user);
-    
+
     if(!$cacheEl->isHit())
     {
       $r = array();
     }
-    else 
+    else
     {
       $r = $cacheEl->get();
     }
@@ -239,7 +237,7 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
 
     return $ret;
   }
-  
+
   public function assign()
   {
     /**
@@ -253,7 +251,8 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
     $url = $this->getRedmineBaseUrl() . '/issues.json?limit='.$limit.'&status_id=*';
 
     $userIssues = array();
-    foreach(array('assigned_to_id=me', 'watcher_id=me') as $search) 
+    $projects = array();
+    foreach(array('assigned_to_id=me', 'watcher_id=me') as $search)
     {
       $offset = 0;
       do {
@@ -269,23 +268,49 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
         foreach($issues['issues'] as $issue)
         {
           $userIssues[] = $issue['id'];
+          $projects[] = $issue['project']['id'];
           //$memcache->set('redmine_'.$issue['id'], array('id' => $issue['id'], 'subject' => $issue['subject']));
           $redmineCacheEl = $this->cache->getItem('redmine_'.$issue['id']);
-          $redmineCacheEl->set(array('id' => $issue['id'], 'subject' => $issue['subject']));
+          $redmineCacheEl->set(array('id' => $issue['id'], 'subject' => $issue['subject'], 'projectId' => $issue['project']['id']));
           $this->cache->save($redmineCacheEl);
         }
         $offset += $limit;
       }
       while($offset < $issues['total_count']);
     }
-    
+
+    if ($this->useActivity)
+    {
+      foreach($userIssues as $redmineIssue)
+      {
+      }
+      $projects = array_unique($projects);
+      foreach($projects as $project)
+      {
+        $projectActivitiesCacheKey = sprintf('redmine_project_%d_activities', $project);
+        $projectActivitiesCache = $this->cache->getItem($projectActivitiesCacheKey);
+        if(!$projectActivitiesCache->isHit())
+        {
+          $projectUrl = sprintf('%s/projects/%s.json?include=time_entry_activities', $this->getRedmineBaseUrl(), $project);
+          $projectActivitiesResult = $this->jsonCall($projectUrl);
+          $projectActivities = \json_decode($projectActivitiesResult['data'], true);
+          if(!$projectActivities['project'])
+          {
+            break;
+          }
+          $projectActivitiesCache->set($projectActivities['project']['time_entry_activities']);
+          $this->cache->save($projectActivitiesCache);
+        }
+      }
+    }
+
     $redmineUserIssuesCacheEl = $this->cache->getItem('redmine_'.$this->user->getUsername());
     $redmineUserIssuesCacheEl->set($userIssues);
     $this->cache->save($redmineUserIssuesCacheEl);
 
     return array('count' => \count($userIssues));
   }
-  
+
   public function createCommentTag(string $comment, \Datetime $start, \Datetime $end)
   {
     return \sprintf(
@@ -317,12 +342,16 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
 
     $fields = array(
       'time_entry[issue_id]' => $args['rid'],
-      //'spent_on' => 
+      //'spent_on' =>
       'time_entry[hours]' => $spent,
       'time_entry[comments]' => $comment,
       'time_entry[spent_on]' => $start->format('Y-m-d'),
     );
-  
+    if($args['activity'])
+    {
+      $fields['time_entry[activity_id]'] = $args['activity'];
+    }
+
     $ret = $this->jsonSend($url, $fields);
     $curlInfos = $ret['infos'];
 
@@ -350,7 +379,7 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
 
     return $newEntry;
   }
-  
+
   public function update($args)
   {
     if(!isset($args['teid']))
@@ -382,12 +411,12 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
 
     $fields = array(
       'time_entry[issue_id]' => $args['rid'],
-      //'spent_on' => 
+      //'spent_on' =>
       'time_entry[hours]' => $spent,
       'time_entry[comments]' => $comment,
       'time_entry[spent_on]' => $start->format('Y-m-d'),
     );
-    
+
     $curlData = $this->jsonSend($url, $fields, 'PUT');
     $r = $curlData['data'];
     $curlInfos = $curlData['infos'];
@@ -405,10 +434,10 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
       'type'  => $this->getName(),
       'rid'   => $args['rid'],
     );
-    
+
     return $newEntry;
   }
-  
+
   /**
    * @fixme redmine ID can be smaller ...
    */
@@ -416,7 +445,7 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
   {
     return \preg_match('/^\d{5}$/', $terms, $matches);
   }
-  
+
   public function autocomplete(array $get)
   {
     $issuesCacheEl = $this->cache->getItem('redmine_'.$this->user->getUsername());
@@ -425,7 +454,7 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
       return array();
     }
     $issues = (array) $issuesCacheEl->get();
-    
+
     $ret = array();
 
     $terms = \trim(\strtolower($get['term']));
@@ -435,7 +464,7 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
     {
       //$issue = $memcache->get('redmine_'.$matches[0]);
       $issueEl = $this->cache->getItem('redmine_'.$matches[0]);
-      
+
       if($issueEl->isHit())
       {
         $issue = $issueEl->get();
@@ -475,7 +504,32 @@ class Redmine extends AbstractConnector implements ConnectorInterface {
     {
       $ret = $ret[$terms];
     }
-    
+
     return $ret;
+  }
+
+  public function projectActivities(array $get)
+  {
+    if(!$this->useActivity)
+    {
+      return array();
+    }
+    $redmineId = $get['redmineId'];
+    $issueCache = $this->cache->getItem('redmine_'.$redmineId);
+    if(!$issueCache->isHit())
+    {
+      return array();
+    }
+    $issue = (array) $issueCache->get();
+
+    $projectActivitiesCacheKey = sprintf('redmine_project_%d_activities', $issue['projectId']);
+
+    $projectActivities = $this->cache->getItem($projectActivitiesCacheKey);
+    if(!$projectActivities->isHit())
+    {
+      return array();
+    }
+
+    return $projectActivities->get();
   }
 }

@@ -18,6 +18,8 @@
   var redmineObj = undefined;
   var redmineComment = undefined;
   var redmineText = undefined;
+  var redmineActivities = undefined;
+  var redmineActivityForm = undefined;
 
   // fixme create a timeout managed
   var timeouts = {
@@ -210,6 +212,8 @@
       redmineObj.val("");
       redmineText.html("");
       redmineComment.val("");
+      redmineActivities = $("#idRedmineActivitySelector");
+      redmineActivityForm = $("#redmineActivity").hide();
       elemDialog.dialog({
         'autoOpen': false,
         zIndex: 100,
@@ -264,6 +268,8 @@
         redmineComment.val("");
         redmineText.html("");
         pendingEvent && pendingEvent.remove();
+        redmineActivities.empty().removeAttr('disabled');
+        redmineActivityForm.hide();
         timeouts.redmine && clearTimeout(timeouts.redmine);
         timeouts.redmine = setTimeout(function() { $('.fc-update_redmine-button').click(); }, 1000 * configuration.refresh);
         redmineUpdateButton.removeClass('pulsating-button');
@@ -282,6 +288,12 @@
           comment: comment,
           rid: redmineId,
           uid: pendingEvent.extendedProps.uid,
+          activity: null,
+        }
+
+        if (redmineActivities.val())
+        {
+          postData.activity = redmineActivities.val();
         }
 
         pendingEvent.setProp('title', redmineId);
@@ -350,6 +362,7 @@
 
           // activer le bouton que si on a un ticket redmine
           $("#timeentryAdd").removeAttr('disabled');
+          updateRedmineActivities();
           return false;
         },
         focus: function(event, ui)
@@ -877,6 +890,8 @@
     elemDialog.dialog("close");
     redmineComment.val("");
     redmineText.html("");
+    redmineActivities.empty().removeAttr('disabled');
+    redmineActivityForm.hide();
   }
 
   function showPopupToConvertToRedmine(event)
@@ -900,6 +915,34 @@
         v.remove();
       }
     })
+  }
+
+  function updateRedmineActivities()
+  {
+    var redmineId = redmineObj.val();
+    $.getJSON('/api/redmine/activities', {'redmineId': redmineId}, function(activities)
+    {
+      redmineActivities.empty();
+      for(var activityKey in activities)
+      {
+        var activity = activities[activityKey];
+        var selectOption = new Option(activity['name'], activity['id'])
+        redmineActivities.append(selectOption);
+      }
+
+      if(activities.length)
+      {
+        redmineActivityForm.show();
+        if(activities.length == 1)
+        {
+          redmineActivities.attr('disabled', 'disabled');
+        }
+        else
+        {
+          redmineActivities.removeAttr('disabled');
+        }
+      }
+    });
   }
 
   function displayDate(info, sourceToUpdate, force)

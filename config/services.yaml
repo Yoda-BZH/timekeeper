@@ -64,6 +64,7 @@ services:
     App\Services\Connectors\Redmine:
         arguments:
             $redmineUrl: 'https://redmine.example.com'
+            $useActivity: false # true to use "activity" field from redmine in time_entries
 
     ##
     # For exchange/office365 calendar, configure here the address of your exchange servers
