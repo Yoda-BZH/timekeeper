@@ -184,7 +184,7 @@
 
     //configuration = {...defaultConfiguration, ...requestedConf};
     configuration = merge_options(defaultConfiguration, requestedConf);
-    console.log(configuration);
+    //console.log(configuration);
 
     // theme list: https://www.bootstrapcdn.com/bootswatch/
     allowedThemes = {
@@ -525,7 +525,7 @@
     calendarOptions = {
       themeSystem: 'bootstrap',
       locale: 'fr',
-      defaultView: 'timeGridWeek',
+      initialView: 'timeGridWeek',
       // duree minimale d'une tache
       slotDuration: '00:15:00',
 
@@ -544,15 +544,7 @@
           endTime: configuration.businessHourEndFri,
         }
       ],
-      plugins: [
-        'dayGrid',
-        'timeGrid',
-        'list',
-        'interaction',
-        //'resourceDayGrid',
-        'bootstrap',
-      ],
-      height: 'parent',
+      height: '100vh',
       // commence le lundi
       firstDay: 1,
       //minTime: '07:00:00',
@@ -582,16 +574,10 @@
           window.open(info.event.url);
         }
       },
-      datesRender: displayDate,
+      datesSet: displayDate,
       rerenderDelay: 100,
       customButtons: customButtons,
-      header: header,
-      eventRender: function(info)
-      {
-        var targetStatus = configuration['visibility_' + info.event.extendedProps.type];
-        //console.log('status must be ', targetStatus, '#visility-' + info.event.extendedProps.type);
-        return targetStatus == 'visible';
-      },
+      headerToolbar: header,
       //eventDurationEditable: true,
       //eventResourceEditable: true,
       editable: true,
@@ -604,13 +590,13 @@
     if(initialDate)
     {
       //console.log('loading custom date', initialDate);
-      calendarOptions.defaultDate = initialDate;
+      calendarOptions.initialDate = initialDate;
     }
 
     if(configuration.showOnlyBusinessHour)
     {
-      calendarOptions.minTime = calendarOptions.businessHours[0].startTime;
-      calendarOptions.maxTime = calendarOptions.businessHours[0].endTime;
+      calendarOptions.slotMinTime = calendarOptions.businessHours[0].startTime;
+      calendarOptions.slotMaxTime = calendarOptions.businessHours[0].endTime;
     }
 
     var calendarEl = document.getElementById('calendar');
@@ -651,13 +637,13 @@
       calendar.setOption('weekends', configuration.showWeekend);
       if(configuration.showOnlyBusinessHour)
       {
-        calendar.setOption('minTime', calendarOptions.businessHours[0].startTime);
-        calendar.setOption('maxTime', calendarOptions.businessHours[0].endTime);
+        calendar.setOption('slotMinTime', calendarOptions.businessHours[0].startTime);
+        calendar.setOption('slotMaxTime', calendarOptions.businessHours[0].endTime);
       }
       else
       {
-        calendar.setOption('minTime', "00:00");
-        calendar.setOption('maxTime', "24:00");
+        calendar.setOption('slotMinTime', "00:00");
+        calendar.setOption('slotMaxTime', "24:00");
       }
 
       if(configuration.theme != oldConfiguration.theme)
@@ -1031,7 +1017,19 @@
     localStorage.setItem(key, newStatus);
     //console.log(calendar, calendarEl)
     updateButtonStatus(sourceType, button);
-    calendar.rerenderEvents();
+    updateEventsStatus(configuration)
+  }
+
+  function updateEventsStatus(configuration)
+  {
+    var allEvents = calendar.getEvents();
+    for (var i in allEvents)
+    {
+      var currentEvent = allEvents[i];
+
+      var targetStatus = configuration['visibility_' + currentEvent.extendedProps.type];
+      currentEvent.setProp('display', targetStatus == 'visible' ? 'visible' : 'none');
+    }
   }
 
   function updateButtonStatus(sourceType, button)

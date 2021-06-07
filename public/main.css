@@ -8,25 +8,10 @@ html, body {
   font-size: 14px;
 }
 
-#calendar-container {
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 100vh;
-}
-
-.demo-topbar { /* will be stripped out */
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 40px;
-}
-
-.demo-topbar + #calendar-container { /* will be stripped out */
+.demo-topbar + #calendar-container {
   top: 40px;
 }
+
 
 .calendar-parent {
 }
@@ -40,7 +25,8 @@ html, body {
   padding: 2em;
 }
 /** pour que l'autocomplete sorte de la boite au besoin */
-#createNew { z-index: 100;
+#createNew {
+  z-index: 100;
   overflow: visible;
 }
 .fc-today.alert-info {
