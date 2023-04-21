@@ -75,6 +75,9 @@ services:
             $emailServer: 'outlook.office365.com'
             # $emailServer: 'owa.example.com'
             $domain: 'MYDOMAIN'
+            $clientId: 'MY_O365_CLIENT_ID'
+            $clientSecret: 'MY_O365_CLIENT_SECRET'
+            $tenantId: 'MY_O365_TENANT_ID'
 
     ##
     # For OTRS entries, well everything is pre-computed in metabase

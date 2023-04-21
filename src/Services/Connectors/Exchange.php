@@ -9,6 +9,9 @@ class Exchange extends AbstractConnector implements ConnectorInterface
     
   private $emailServer = '';
   private $domain = '';
+  private $clientId = '';
+  private $clientSecret = '';
+  private $tenantId = '';
   
   private $preferedEmailAsLogin;
   
@@ -24,11 +27,14 @@ class Exchange extends AbstractConnector implements ConnectorInterface
     ),
   );
 
-  public function __construct(CacheInterface $cache, string $emailServer, string $domain)
+  public function __construct(CacheInterface $cache, string $emailServer, string $domain, string $clientId, string $clientSecret, string $tenantId)
   {
     $this->cache = $cache;
     $this->emailServer = $emailServer;
     $this->domain = $domain;
+    $this->clientId = $clientId;
+    $this->clientSecret = $clientSecret;
+    $this->tenantId = $tenantId;
   }
 
   public function getName()
@@ -107,12 +113,15 @@ class Exchange extends AbstractConnector implements ConnectorInterface
     $workingAccount = false;
     foreach($listOfEmails as $userEmail)
     {
-      $cmd = sprintf('../src/py-exchange/calendar-exchange.py --start=%s --stop=%s --login=%s --mail=%s --server=%s',
+      $cmd = sprintf('../src/py-exchange/calendar-exchange.py --start=%s --stop=%s --login=%s --mail=%s --server=%s --client_id=%s --client_secret=%s --tenant_id=%s',
         \escapeshellarg($strStart),
         \escapeshellarg($strEnd),
         \escapeshellarg($exchangeUser),
         \escapeshellarg($userEmail),
         \escapeshellarg($this->emailServer),
+	\escapeshellarg($this->clientId),
+	\escapeshellarg($this->clientSecret),
+	\escapeshellarg($this->tenantId),
         \escapeshellarg($this->domain)
       );
       //header('X-Cmd: '.$cmd);

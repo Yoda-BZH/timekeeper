@@ -2,61 +2,89 @@ import logging
 
 from cached_property import threaded_cached_property
 
-from .credentials import BaseCredentials
-from .protocol import RetryPolicy, FailFast
-from .transport import AUTH_TYPE_MAP
+from .credentials import BaseCredentials, OAuth2AuthorizationCodeCredentials, OAuth2Credentials, OAuth2LegacyCredentials
+from .errors import InvalidEnumValue, InvalidTypeError
+from .protocol import FailFast, RetryPolicy
+from .transport import AUTH_TYPE_MAP, CREDENTIALS_REQUIRED, OAUTH2
 from .util import split_url
 from .version import Version
 
 log = logging.getLogger(__name__)
 
+DEFAULT_AUTH_TYPE = {
+    # This type of credentials *must* use the OAuth auth type
+    OAuth2Credentials: OAUTH2,
+    OAuth2LegacyCredentials: OAUTH2,
+    OAuth2AuthorizationCodeCredentials: OAUTH2,
+}
+
 
 class Configuration:
+    """Contains information needed to create an authenticated connection to an EWS endpoint.
+
+    The 'credentials' argument contains the credentials needed to authenticate with the server. Multiple credentials
+    implementations are available in 'exchangelib.credentials'.
+
+    config = Configuration(credentials=Credentials('john@example.com', 'MY_SECRET'), ...)
+
+    The 'server' and 'service_endpoint' arguments are mutually exclusive. The former must contain only a domain name,
+    the latter a full URL:
+
+        config = Configuration(server='example.com', ...)
+        config = Configuration(service_endpoint='https://mail.example.com/EWS/Exchange.asmx', ...)
+
+    If you know which authentication type the server uses, you add that as a hint in 'auth_type'. Likewise, you can
+    add the server version as a hint. This allows to skip the auth type and version guessing routines:
+
+        config = Configuration(auth_type=NTLM, ...)
+        config = Configuration(version=Version(build=Build(15, 1, 2, 3)), ...)
+
+    You can use 'retry_policy' to define a custom retry policy for handling server connection failures:
+
+        config = Configuration(retry_policy=FaultTolerance(max_wait=3600), ...)
+
+    'max_connections' defines the max number of connections allowed for this server. This may be restricted by
+    policies on the Exchange server.
     """
-    Assembles a connection protocol when autodiscover is not used.
 
-    If the server is not configured with autodiscover, the following should be sufficient:
-
-        config = Configuration(server='example.com', credentials=Credentials('MYWINDOMAIN\\myusername', 'topsecret'))
-        account = Account(primary_smtp_address='john@example.com', config=config)
-
-    You can also set the EWS service endpoint directly:
-
-        config = Configuration(service_endpoint='https://mail.example.com/EWS/Exchange.asmx', credentials=...)
-
-    If you know which authentication type the server uses, you add that as a hint:
-
-        config = Configuration(service_endpoint='https://example.com/EWS/Exchange.asmx', auth_type=NTLM, credentials=..)
-
-    If you want to use autodiscover, don't use a Configuration object. Instead, set up an account like this:
-
-        credentials = Credentials(username='MYWINDOMAIN\\myusername', password='topsecret')
-        account = Account(primary_smtp_address='john@example.com', credentials=credentials, autodiscover=True)
-
-    """
-    def __init__(self, credentials=None, server=None, service_endpoint=None, auth_type=None, version=None,
-                 retry_policy=None):
+    def __init__(
+        self,
+        credentials=None,
+        server=None,
+        service_endpoint=None,
+        auth_type=None,
+        version=None,
+        retry_policy=None,
+        max_connections=None,
+    ):
         if not isinstance(credentials, (BaseCredentials, type(None))):
-            raise ValueError("'credentials' %r must be a Credentials instance" % credentials)
+            raise InvalidTypeError("credentials", credentials, BaseCredentials)
+        if auth_type is None:
+            # Set a default auth type for the credentials where this makes sense
+            auth_type = DEFAULT_AUTH_TYPE.get(type(credentials))
+        if auth_type is not None and auth_type not in AUTH_TYPE_MAP:
+            raise InvalidEnumValue("auth_type", auth_type, AUTH_TYPE_MAP)
+        if credentials is None and auth_type in CREDENTIALS_REQUIRED:
+            raise ValueError(f"Auth type {auth_type!r} was detected but no credentials were provided")
         if server and service_endpoint:
             raise AttributeError("Only one of 'server' or 'service_endpoint' must be provided")
-        if auth_type is not None and auth_type not in AUTH_TYPE_MAP:
-            raise ValueError("'auth_type' %r must be one of %s"
-                             % (auth_type, ', '.join("'%s'" % k for k in sorted(AUTH_TYPE_MAP.keys()))))
         if not retry_policy:
             retry_policy = FailFast()
         if not isinstance(version, (Version, type(None))):
-            raise ValueError("'version' %r must be a Version instance" % version)
+            raise InvalidTypeError("version", version, Version)
         if not isinstance(retry_policy, RetryPolicy):
-            raise ValueError("'retry_policy' %r must be a RetryPolicy instance" % retry_policy)
+            raise InvalidTypeError("retry_policy", retry_policy, RetryPolicy)
+        if not isinstance(max_connections, (int, type(None))):
+            raise InvalidTypeError("max_connections", max_connections, int)
         self._credentials = credentials
         if server:
-            self.service_endpoint = 'https://%s/EWS/Exchange.asmx' % server
+            self.service_endpoint = f"https://{server}/EWS/Exchange.asmx"
         else:
             self.service_endpoint = service_endpoint
         self.auth_type = auth_type
         self.version = version
         self.retry_policy = retry_policy
+        self.max_connections = max_connections
 
     @property
     def credentials(self):
@@ -65,9 +93,13 @@ class Configuration:
 
     @threaded_cached_property
     def server(self):
+        if not self.service_endpoint:
+            return None
         return split_url(self.service_endpoint)[1]
 
     def __repr__(self):
-        return self.__class__.__name__ + '(%s)' % ', '.join('%s=%r' % (k, getattr(self, k)) for k in (
-            'credentials', 'service_endpoint', 'auth_type', 'version', 'retry_policy'
-        ))
+        args_str = ", ".join(
+            f"{k}={getattr(self, k)!r}"
+            for k in ("credentials", "service_endpoint", "auth_type", "version", "retry_policy")
+        )
+        return f"{self.__class__.__name__}({args_str})"

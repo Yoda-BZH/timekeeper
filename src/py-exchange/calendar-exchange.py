@@ -12,7 +12,7 @@ import sys
 import argparse
 
 ## Other
-from exchangelib import DELEGATE, IMPERSONATION, Account, Credentials, \
+from exchangelib import DELEGATE, IMPERSONATION, Account, Credentials, OAuth2LegacyCredentials,\
     Configuration, NTLM, GSSAPI, Build, Version, EWSDateTime, CalendarItem, EWSTimeZone
 
 
@@ -22,6 +22,9 @@ parser.add_argument('--stop',     required=True, help="File with the results")
 parser.add_argument('--login', required=True, help="login")
 parser.add_argument('--mail', required=True, help="User login")
 parser.add_argument('--server', required=True)
+parser.add_argument('--client_id', required=True)
+parser.add_argument('--client_secret', required=True)
+parser.add_argument('--tenant_id', required=True)
 
 args = parser.parse_args()
 
@@ -32,10 +35,18 @@ dateEnd       = args.stop.split('-')
 user_login    = args.login
 user_mail     = args.mail
 server        = args.server
+client_id     = args.client_id
+client_secret = args.client_secret
+tenant_id     = args.tenant_id
 user_password = input("")
 
 # Setup exchangelib necessary objects
-ews_credentials   = Credentials(user_login, user_password)
+ews_credentials   = OAuth2LegacyCredentials(
+        client_id=client_id,
+        client_secret=client_secret,
+        tenant_id=tenant_id,
+        username=user_login,
+        password=user_password)
 ews_configuration = Configuration(server=server, credentials=ews_credentials)
 
 # Try to login to EWS, using user supplied parameters, and bail if an error happens
@@ -54,8 +65,8 @@ except:
 
 #sys.exit(0)
 
-start = account.default_timezone.localize(EWSDateTime(int(dateStart[0]), int(dateStart[1]), int(dateStart[2])))
-end   = account.default_timezone.localize(EWSDateTime(int(dateEnd[0]), int(dateEnd[1]), int(dateEnd[2])))
+start = EWSDateTime(int(dateStart[0]), int(dateStart[1]), int(dateStart[2]), tzinfo=account.default_timezone)
+end   = EWSDateTime(int(dateEnd[0]), int(dateEnd[1]), int(dateEnd[2]), tzinfo=account.default_timezone)
 
 def calendarItemNormalize(item):
     """
