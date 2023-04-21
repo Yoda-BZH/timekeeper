@@ -1,28 +1,42 @@
-from ..util import create_element, set_xml_value, MNS
-from .common import EWSAccountService, parse_folder_elem, create_folder_ids_element
+from ..errors import ErrorFolderExists
+from ..util import MNS, create_element
+from .common import EWSAccountService, folder_ids_element, parse_folder_elem
 
 
 class CreateFolder(EWSAccountService):
-    """
-    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/createfolder-operation
-    """
-    SERVICE_NAME = 'CreateFolder'
-    element_container_name = '{%s}Folders' % MNS
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/createfolder-operation"""
+
+    SERVICE_NAME = "CreateFolder"
+    element_container_name = f"{{{MNS}}}Folders"
+    ERRORS_TO_CATCH_IN_RESPONSE = EWSAccountService.ERRORS_TO_CATCH_IN_RESPONSE + (ErrorFolderExists,)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.folders = []  # A hack to communicate parsing args to _elems_to_objs()
 
     def call(self, parent_folder, folders):
         # We can't easily find the correct folder class from the returned XML. Instead, return objects with the same
         # class as the folder instance it was requested with.
-        folders_list = list(folders)  # Convert to a list, in case 'folders' is a generator
-        for folder, elem in zip(folders_list, self._get_elements(payload=self.get_payload(
-                parent_folder=parent_folder, folders=folders
-        ))):
+        self.folders = list(folders)  # Convert to a list, in case 'folders' is a generator. We're iterating twice.
+        return self._elems_to_objs(
+            self._chunked_get_elements(
+                self.get_payload,
+                items=self.folders,
+                parent_folder=parent_folder,
+            )
+        )
+
+    def _elems_to_objs(self, elems):
+        for folder, elem in zip(self.folders, elems):
+            if isinstance(elem, Exception):
+                yield elem
+                continue
             yield parse_folder_elem(elem=elem, folder=folder, account=self.account)
 
-    def get_payload(self, parent_folder, folders):
-        create_folder = create_element('m:%s' % self.SERVICE_NAME)
-        parentfolderid = create_element('m:ParentFolderId')
-        set_xml_value(parentfolderid, parent_folder, version=self.account.version)
-        set_xml_value(create_folder, parentfolderid, version=self.account.version)
-        folder_ids = create_folder_ids_element(tag='m:Folders', folders=folders, version=self.account.version)
-        create_folder.append(folder_ids)
-        return create_folder
+    def get_payload(self, folders, parent_folder):
+        payload = create_element(f"m:{self.SERVICE_NAME}")
+        payload.append(
+            folder_ids_element(folders=[parent_folder], version=self.account.version, tag="m:ParentFolderId")
+        )
+        payload.append(folder_ids_element(folders=folders, version=self.account.version, tag="m:Folders"))
+        return payload

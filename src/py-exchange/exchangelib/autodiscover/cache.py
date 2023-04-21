@@ -1,4 +1,3 @@
-from contextlib import contextmanager
 import getpass
 import glob
 import logging
@@ -6,6 +5,7 @@ import os
 import shelve
 import sys
 import tempfile
+from contextlib import contextmanager, suppress
 from threading import RLock
 
 from ..configuration import Configuration
@@ -25,10 +25,8 @@ def shelve_filename():
         user = getpass.getuser()
     except KeyError:
         # getuser() fails on some systems. Provide a sane default. See issue #448
-        user = 'exchangelib'
-    return 'exchangelib.{version}.cache.{user}.py{major}{minor}'.format(
-        version=version, user=user, major=major, minor=minor
-    )
+        user = "exchangelib"
+    return f"exchangelib.{version}.cache.{user}.py{major}{minor}"
 
 
 AUTODISCOVER_PERSISTENT_STORAGE = os.path.join(tempfile.gettempdir(), shelve_filename())
@@ -41,9 +39,13 @@ def shelve_open_with_failover(filename):
     # We don't know which file caused the error, so just delete them all.
     try:
         shelve_handle = shelve.open(filename)
+        # Try to actually use the file. Some implementations may allow opening the file but then throw
+        # errors on access.
+        with suppress(KeyError):
+            _ = shelve_handle[""]
     except Exception as e:
-        for f in glob.glob(filename + '*'):
-            log.warning('Deleting invalid cache file %s (%r)', f, e)
+        for f in glob.glob(filename + "*"):
+            log.warning("Deleting invalid cache file %s (%r)", f, e)
             os.unlink(f)
         shelve_handle = shelve.open(filename)
     yield shelve_handle
@@ -65,6 +67,7 @@ class AutodiscoverCache:
 
     'shelve' is supposedly thread-safe and process-safe, which suits our needs.
     """
+
     def __init__(self):
         self._protocols = {}  # Mapping from (domain, credentials) to AutodiscoverProtocol
         self._lock = RLock()
@@ -94,9 +97,11 @@ class AutodiscoverCache:
         domain, credentials = key
         with shelve_open_with_failover(self._storage_file) as db:
             endpoint, auth_type, retry_policy = db[str(domain)]  # It's OK to fail with KeyError here
-        protocol = AutodiscoverProtocol(config=Configuration(
-            service_endpoint=endpoint, credentials=credentials, auth_type=auth_type, retry_policy=retry_policy
-        ))
+        protocol = AutodiscoverProtocol(
+            config=Configuration(
+                service_endpoint=endpoint, credentials=credentials, auth_type=auth_type, retry_policy=retry_policy
+            )
+        )
         self._protocols[key] = protocol
         return protocol
 
@@ -113,19 +118,15 @@ class AutodiscoverCache:
         # multiple times due to race conditions.
         domain = key[0]
         with shelve_open_with_failover(self._storage_file) as db:
-            try:
+            with suppress(KeyError):
                 del db[str(domain)]
-            except KeyError:
-                pass
-        try:
+        with suppress(KeyError):
             del self._protocols[key]
-        except KeyError:
-            pass
 
     def close(self):
         # Close all open connections
         for (domain, _), protocol in self._protocols.items():
-            log.debug('Domain %s: Closing sessions', domain)
+            log.debug("Domain %s: Closing sessions", domain)
             protocol.close()
             del protocol
         self._protocols.clear()

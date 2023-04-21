@@ -1,24 +1,21 @@
-from ..util import create_element, set_xml_value, MNS
+from ..properties import Room
+from ..util import MNS, create_element, set_xml_value
 from ..version import EXCHANGE_2010
 from .common import EWSService
 
 
 class GetRooms(EWSService):
-    """
-    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/getrooms
-    """
-    SERVICE_NAME = 'GetRooms'
-    element_container_name = '{%s}Rooms' % MNS
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/getrooms-operation"""
 
-    def call(self, roomlist):
-        from ..properties import Room
-        if self.protocol.version.build < EXCHANGE_2010:
-            raise NotImplementedError('%s is only supported for Exchange 2010 servers and later' % self.SERVICE_NAME)
+    SERVICE_NAME = "GetRooms"
+    element_container_name = f"{{{MNS}}}Rooms"
+    supported_from = EXCHANGE_2010
 
-        for elem in self._get_elements(payload=self.get_payload(roomlist=roomlist)):
-            yield Room.from_xml(elem=elem, account=None)
+    def call(self, room_list):
+        return self._elems_to_objs(self._get_elements(payload=self.get_payload(room_list=room_list)))
 
-    def get_payload(self, roomlist):
-        getrooms = create_element('m:%s' % self.SERVICE_NAME)
-        set_xml_value(getrooms, roomlist, version=self.protocol.version)
-        return getrooms
+    def _elem_to_obj(self, elem):
+        return Room.from_xml(elem=elem, account=None)
+
+    def get_payload(self, room_list):
+        return set_xml_value(create_element(f"m:{self.SERVICE_NAME}"), room_list, version=self.protocol.version)

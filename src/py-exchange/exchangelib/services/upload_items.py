@@ -1,42 +1,47 @@
-from ..util import create_element, set_xml_value, add_xml_child, MNS
-from .common import EWSAccountService, EWSPooledMixIn
+from ..properties import ItemId, ParentFolderId
+from ..util import MNS, add_xml_child, create_element, set_xml_value
+from .common import EWSAccountService, to_item_id
 
 
-class UploadItems(EWSAccountService, EWSPooledMixIn):
-    """
-    MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/uploaditems-operation
+class UploadItems(EWSAccountService):
+    """MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/uploaditems-operation"""
 
-    This currently has the existing limitation of only being able to upload
-    items that do not yet exist in the database. The full spec also allows
-    actions "Update" and "UpdateOrCreate".
-    """
-    SERVICE_NAME = 'UploadItems'
-    element_container_name = '{%s}ItemId' % MNS
+    SERVICE_NAME = "UploadItems"
+    element_container_name = f"{{{MNS}}}ItemId"
 
-    def call(self, data):
+    def call(self, items):
         # _pool_requests expects 'items', not 'data'
-        return self._pool_requests(payload_func=self.get_payload, **dict(items=data))
+        return self._elems_to_objs(self._chunked_get_elements(self.get_payload, items=items))
 
     def get_payload(self, items):
-        """Upload given items to given account
+        """Upload given items to given account.
 
-        data is an iterable of tuples where the first element is a Folder
-        instance representing the ParentFolder that the item will be placed in
-        and the second element is a Data string returned from an ExportItems
+        'items' is an iterable of tuples where the first element is a Folder instance representing the ParentFolder
+        that the item will be placed in and the second element is a tuple containing an optional ItemId, an optional
+        Item.is_associated boolean, and a Data string returned from an ExportItems.
         call.
-        """
-        from ..properties import ParentFolderId
-        uploaditems = create_element('m:%s' % self.SERVICE_NAME)
-        itemselement = create_element('m:Items')
-        uploaditems.append(itemselement)
-        for parent_folder, data_str in items:
-            item = create_element('t:Item', attrs=dict(CreateAction='CreateNew'))
-            parentfolderid = ParentFolderId(parent_folder.id, parent_folder.changekey)
-            set_xml_value(item, parentfolderid, version=self.account.version)
-            add_xml_child(item, 't:Data', data_str)
-            itemselement.append(item)
-        return uploaditems
 
-    def _get_elements_in_container(self, container):
-        from ..properties import ItemId
-        return [(container.get(ItemId.ID_ATTR), container.get(ItemId.CHANGEKEY_ATTR))]
+        :param items:
+        """
+        payload = create_element(f"m:{self.SERVICE_NAME}")
+        items_elem = create_element("m:Items")
+        payload.append(items_elem)
+        for parent_folder, (item_id, is_associated, data_str) in items:
+            # TODO: The full spec also allows the "UpdateOrCreate" create action.
+            attrs = dict(CreateAction="Update" if item_id else "CreateNew")
+            if is_associated is not None:
+                attrs["IsAssociated"] = is_associated
+            item = create_element("t:Item", attrs=attrs)
+            set_xml_value(item, ParentFolderId(parent_folder.id, parent_folder.changekey), version=self.account.version)
+            if item_id:
+                set_xml_value(item, to_item_id(item_id, ItemId), version=self.account.version)
+            add_xml_child(item, "t:Data", data_str)
+            items_elem.append(item)
+        return payload
+
+    def _elem_to_obj(self, elem):
+        return elem.get(ItemId.ID_ATTR), elem.get(ItemId.CHANGEKEY_ATTR)
+
+    @classmethod
+    def _get_elements_in_container(cls, container):
+        return [container]

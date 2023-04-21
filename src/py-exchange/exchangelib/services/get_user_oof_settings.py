@@ -1,38 +1,40 @@
-from ..util import create_element, set_xml_value, MNS, TNS
+from ..properties import AvailabilityMailbox
+from ..settings import OofSettings
+from ..util import MNS, TNS, create_element, set_xml_value
 from .common import EWSAccountService
 
 
 class GetUserOofSettings(EWSAccountService):
-    """
-    Get automatic reply settings for the specified mailbox.
+    """Get automatic reply settings for the specified mailbox.
     MSDN: https://docs.microsoft.com/en-us/exchange/client-developer/web-service-reference/getuseroofsettings-operation
     """
-    SERVICE_NAME = 'GetUserOofSettings'
-    element_container_name = '{%s}OofSettings' % TNS
+
+    SERVICE_NAME = "GetUserOofSettings"
+    element_container_name = f"{{{TNS}}}OofSettings"
 
     def call(self, mailbox):
-        return self._get_elements(payload=self.get_payload(mailbox=mailbox))
+        return self._elems_to_objs(self._get_elements(payload=self.get_payload(mailbox=mailbox)))
+
+    def _elem_to_obj(self, elem):
+        return OofSettings.from_xml(elem=elem, account=self.account)
 
     def get_payload(self, mailbox):
-        from ..properties import AvailabilityMailbox
-        payload = create_element('m:%sRequest' % self.SERVICE_NAME)
-        return set_xml_value(payload, AvailabilityMailbox.from_mailbox(mailbox), version=self.account.version)
-
-    def _get_elements_in_response(self, response):
-        # This service only returns one result, but 'response' is a list
-        from ..settings import OofSettings
-        response = list(response)
-        if len(response) != 1:
-            raise ValueError("Expected 'response' length 1, got %s" % response)
-        msg = response[0]
-        container_or_exc = self._get_element_container(message=msg, name=self.element_container_name)
-        if isinstance(container_or_exc, (bool, Exception)):
-            # pylint: disable=raising-bad-type
-            raise container_or_exc
-        return OofSettings.from_xml(container_or_exc, account=self.account)
-
-    def _get_element_container(self, message, response_message=None, name=None):
-        response_message = message.find('{%s}ResponseMessage' % MNS)
-        return super()._get_element_container(
-            message=message, response_message=response_message, name=name
+        return set_xml_value(
+            create_element(f"m:{self.SERVICE_NAME}Request"),
+            AvailabilityMailbox.from_mailbox(mailbox),
+            version=self.account.version,
         )
+
+    @classmethod
+    def _get_elements_in_container(cls, container):
+        # This service only returns one result, directly in 'container'
+        return [container]
+
+    def _get_element_container(self, message, name=None):
+        # This service returns the result container outside the response message
+        super()._get_element_container(message=message.find(self._response_message_tag()), name=None)
+        return message.find(name)
+
+    @classmethod
+    def _response_message_tag(cls):
+        return f"{{{MNS}}}ResponseMessage"

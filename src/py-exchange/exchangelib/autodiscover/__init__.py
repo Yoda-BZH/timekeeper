@@ -14,6 +14,11 @@ def clear_cache():
 
 
 __all__ = [
-    'AutodiscoverCache', 'AutodiscoverProtocol', 'Autodiscovery', 'discover', 'autodiscover_cache',
-    'close_connections', 'clear_cache'
+    "AutodiscoverCache",
+    "AutodiscoverProtocol",
+    "Autodiscovery",
+    "discover",
+    "autodiscover_cache",
+    "close_connections",
+    "clear_cache",
 ]
